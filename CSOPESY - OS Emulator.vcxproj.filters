@@ -21,13 +21,40 @@
     <ClCompile Include="OLDCODE.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+<<<<<<< HEAD
     <ClCompile Include="process.cpp">
+=======
+    <ClCompile Include="ConsoleManager.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="MainConsole.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="AConsole.cpp">
+>>>>>>> f4110265250ff1fb09a1659a7241f4ca9ac2cec4
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
+<<<<<<< HEAD
     <ClInclude Include="process.h">
       <Filter>Header Files</Filter>
+=======
+    <ClInclude Include="AConsole.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ConsoleManager.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="MainConsole.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="MarqueeConsole.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="SchedulingConsole.h">
+      <Filter>Source Files</Filter>
+>>>>>>> f4110265250ff1fb09a1659a7241f4ca9ac2cec4
     </ClInclude>
   </ItemGroup>
 </Project>

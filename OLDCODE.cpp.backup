@@ -258,7 +258,7 @@ public:
     }
 };
 
-int main() {
+int func() {
     bool running = true;
     MainConsole mainConsole;
     ProcessConsole processConsole;
