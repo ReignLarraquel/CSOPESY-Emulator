@@ -1,0 +1,32 @@
+# === Line endings ===
+# Ensure consistent LF in repository, convert to CRLF on Windows checkout
+* text=auto
+
+# === Visual Studio solution & project files ===
+# Treat these as text/XML for diff/merge, and use union merges on conflicts
+*.sln             text merge=union
+*.vcxproj         text merge=union
+*.vcxproj.filters text merge=union
+*.vcxproj.user    text merge=union
+*.props           text merge=union
+*.targets         text merge=union
+
+# === Generated & binary files (ignore in diff/merge) ===
+# Object, pdb, exe, dll, cache, packages, NuGet, user-specific etc.
+*.obj             binary
+*.exe             binary
+*.dll             binary
+*.pdb             binary
+*.cachefile       binary
+*.ilk             binary
+*.meta            binary
+*.vspscc          binary
+*.vssscc          binary
+*.dbmdl           binary
+
+# === IDE-specific folders ===
+# (these are normally in .gitignore, but we don’t want diff/merge stanzas on them)
+.vs/              binary
+Debug/            binary
+Release/          binary
+packages/         binary
