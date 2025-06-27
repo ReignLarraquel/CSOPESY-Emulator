@@ -124,8 +124,20 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="AConsole.cpp" />
+    <ClCompile Include="ConsoleManager.cpp" />
     <ClCompile Include="main.cpp" />
-    <ClCompile Include="OLDCODE.cpp" />
+    <ClCompile Include="MainConsole.cpp" />
+    <ClCompile Include="MarqueeConsole.cpp" />
+    <ClCompile Include="SchedulingConsole.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="AConsole.h" />
+    <ClInclude Include="ConsoleManager.h" />
+    <ClInclude Include="MainConsole.h" />
+    <ClInclude Include="MarqueeConsole.h" />
+    <ClInclude Include="SchedulingConsole.h" />
+    <ClInclude Include="TypedefRepo.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
