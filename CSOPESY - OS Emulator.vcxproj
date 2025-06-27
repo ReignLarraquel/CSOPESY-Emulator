@@ -127,13 +127,11 @@
     <ClCompile Include="AConsole.cpp" />
     <ClCompile Include="ConsoleManager.cpp" />
     <ClCompile Include="main.cpp" />
-<<<<<<< HEAD
     <ClCompile Include="OLDCODE.cpp" />
     <ClCompile Include="process.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="process.h" />
-=======
     <ClCompile Include="MainConsole.cpp" />
     <ClCompile Include="MarqueeConsole.cpp" />
     <ClCompile Include="SchedulingConsole.cpp" />
@@ -145,7 +143,6 @@
     <ClInclude Include="MarqueeConsole.h" />
     <ClInclude Include="SchedulingConsole.h" />
     <ClInclude Include="TypedefRepo.h" />
->>>>>>> f4110265250ff1fb09a1659a7241f4ca9ac2cec4
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
