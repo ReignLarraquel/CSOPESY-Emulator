@@ -165,9 +165,8 @@ void MainConsole::startScheduler() {
 
 void MainConsole::stopScheduler() {
     if (scheduler->isRunning()) {
-        scheduler->stopProcessGeneration();
         scheduler->stop();
-        std::cout << "\033[32mScheduler stopped!\033[0m" << std::endl;
+        std::cout << "\033[33mScheduler stopping... (finishing existing processes)\033[0m" << std::endl;
     } else {
         std::cout << "\033[33mScheduler is not running.\033[0m" << std::endl;
     }
@@ -193,16 +192,17 @@ void MainConsole::generateReport() {
     reportFile << "Cores available: " << coresAvailable << std::endl;
     reportFile << "--------------------------------------" << std::endl;
     
-    // Get processes by status from scheduler
+    // Get processes by status from scheduler (report generation)
     auto runningProcesses = scheduler->getProcessesByStatus(ProcessStatus::Running);
     auto waitingProcesses = scheduler->getProcessesByStatus(ProcessStatus::Waiting);
+    auto sleepingProcesses = scheduler->getProcessesByStatus(ProcessStatus::Sleeping);
     auto finishedProcesses = scheduler->getProcessesByStatus(ProcessStatus::Finished);
     
     // Write running processes
     reportFile << "\nRunning processes:" << std::endl;
     for (const String& processName : runningProcesses) {
         auto process = scheduler->getProcess(processName);
-        if (process) {
+        if (process && process->getAssignedCore() >= 0) {  // Safety check: only show processes with valid cores
             int currentLine = process->getTotalInstructions() - process->getRemainingInstructions();
             reportFile << processName << "\t(" << process->getCreationTime() << ")\t"
                       << "Core:" << process->getAssignedCore() << "\t"
@@ -218,6 +218,16 @@ void MainConsole::generateReport() {
             int currentLine = process->getTotalInstructions() - process->getRemainingInstructions();
             reportFile << processName << "\t(" << process->getCreationTime() << ")\t"
                       << currentLine << " / " << process->getTotalInstructions() << std::endl;
+        }
+    }
+    
+    // Write sleeping processes (they're also waiting but sleeping)
+    for (const String& processName : sleepingProcesses) {
+        auto process = scheduler->getProcess(processName);
+        if (process) {
+            int currentLine = process->getTotalInstructions() - process->getRemainingInstructions();
+            reportFile << processName << "\t(" << process->getCreationTime() << ")\t"
+                      << currentLine << " / " << process->getTotalInstructions() << " (sleeping)" << std::endl;
         }
     }
     
@@ -272,15 +282,16 @@ void MainConsole::listProcesses() {
     std::cout << "Cores available: " << coresAvailable << std::endl;
     std::cout << "--------------------------------------" << std::endl;
     
-    // Get processes by status from scheduler
+    // Get processes by status from scheduler (listProcesses)
     auto runningProcesses = scheduler->getProcessesByStatus(ProcessStatus::Running);
     auto waitingProcesses = scheduler->getProcessesByStatus(ProcessStatus::Waiting);
+    auto sleepingProcesses = scheduler->getProcessesByStatus(ProcessStatus::Sleeping);
     auto finishedProcesses = scheduler->getProcessesByStatus(ProcessStatus::Finished);
     
     std::cout << "\nRunning processes:" << std::endl;
     for (const String& processName : runningProcesses) {
         auto process = scheduler->getProcess(processName);
-        if (process) {
+        if (process && process->getAssignedCore() >= 0) {  // Safety check: only show processes with valid cores
             int currentLine = process->getTotalInstructions() - process->getRemainingInstructions();
             std::cout << processName << "\t(" << process->getCreationTime() << ")\t"
                      << "Core:" << process->getAssignedCore() << "\t"
@@ -295,6 +306,16 @@ void MainConsole::listProcesses() {
             int currentLine = process->getTotalInstructions() - process->getRemainingInstructions();
             std::cout << processName << "\t(" << process->getCreationTime() << ")\t"
                      << currentLine << " / " << process->getTotalInstructions() << std::endl;
+        }
+    }
+    
+    // Show sleeping processes (they're also waiting but sleeping)
+    for (const String& processName : sleepingProcesses) {
+        auto process = scheduler->getProcess(processName);
+        if (process) {
+            int currentLine = process->getTotalInstructions() - process->getRemainingInstructions();
+            std::cout << processName << "\t(" << process->getCreationTime() << ")\t"
+                     << currentLine << " / " << process->getTotalInstructions() << " (sleeping)" << std::endl;
         }
     }
     

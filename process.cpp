@@ -5,13 +5,17 @@
 #include <iomanip>
 #include <sstream>
 #include <thread>
+#include <random>
+#include <algorithm>
 
 
-    // Constructor: initializes all fields
+    // Constructor: initializes all fields and generates random instructions
     Process::Process(const std::string& processName, int processId, int numInstructions)
         : name(processName), id(processId), totalInstructions(numInstructions), 
-          remainingInstructions(numInstructions), status(ProcessStatus::Waiting), assignedCore(-1) {
+          remainingInstructions(numInstructions), status(ProcessStatus::Waiting), 
+          assignedCore(-1), currentInstructionIndex(0), sleepCyclesRemaining(0) {
         creationTime = getTimestamp();
+        generateRandomInstructions(numInstructions);
     }
 
     void Process::printProcess() const {
@@ -66,28 +70,278 @@
         }
     }
 
-    // Executes one instruction, logs it with timestamp
+    // Main instruction execution method
     void Process::executeInstruction() {
-        if (remainingInstructions <= 0) return;
-
-        // Apply delay-per-exec configuration
-        int delay = Config::getDelayPerExec();
-        if (delay > 0) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(delay));
+        if (remainingInstructions <= 0 || currentInstructionIndex >= instructions.size()) {
+            return;
         }
 
+        // Apply delay-per-exec as busy-waiting (process stays on CPU)
+        int delay = Config::getDelayPerExec();
+        if (delay > 0) {
+            // Busy-wait for specified number of CPU cycles
+            auto start = std::chrono::steady_clock::now();
+            auto target = start + std::chrono::milliseconds(delay * 1); // delay * tick_duration
+            while (std::chrono::steady_clock::now() < target) {
+                // Busy wait - process remains on CPU
+            }
+        }
+
+        // Handle SLEEP cycles - this should only be called when process is Running
+        // If process is Sleeping, it shouldn't be scheduled until sleep ends
+        if (sleepCyclesRemaining > 0) {
+            sleepCyclesRemaining--;
+            if (sleepCyclesRemaining == 0) {
+                // Sleep finished, return to Waiting status
+                status = ProcessStatus::Waiting;
+            }
+            return; // Don't execute any instruction during sleep
+        }
+
+        // Execute current instruction
+        const Instruction& currentInstr = instructions[currentInstructionIndex];
+        
+        switch (currentInstr.type) {
+            case InstructionType::PRINT:
+                executePrintInstruction(currentInstr);
+                break;
+            case InstructionType::DECLARE:
+                executeDeclareInstruction(currentInstr);
+                break;
+            case InstructionType::ADD:
+                executeAddInstruction(currentInstr);
+                break;
+            case InstructionType::SUBTRACT:
+                executeSubtractInstruction(currentInstr);
+                break;
+            case InstructionType::SLEEP:
+                executeSleepInstruction(currentInstr);
+                break;
+            case InstructionType::FOR_START:
+                executeForStartInstruction(currentInstr);
+                break;
+            case InstructionType::FOR_END:
+                executeForEndInstruction(currentInstr);
+                break;
+        }
+
+        // Move to next instruction and update counters
+        currentInstructionIndex++;
         --remainingInstructions;
-        std::ostringstream entry;
-        entry << getTimestamp()  // Current execution time, not creation time
-            << " Core:" << assignedCore << " \"Hello world from " << name << "!\"";
-        logs.push_back(entry.str());
         
         // Auto-update status when finished
-        if (remainingInstructions == 0) {
+        if (remainingInstructions == 0 || currentInstructionIndex >= instructions.size()) {
             status = ProcessStatus::Finished;
         }
     }
 
+    void Process::generateRandomInstructions(int numInstructions) {
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_int_distribution<> instrTypeDist(0, 6); // 7 instruction types
+        std::uniform_int_distribution<> valueDist(1, 100);
+        std::uniform_int_distribution<> forRepeatsDist(2, 5);
+        std::uniform_int_distribution<> sleepDist(1, 10);
+        
+        instructions.clear();
+        instructions.reserve(numInstructions);
+        
+        int forNestingLevel = 0;
+        std::vector<int> forStartPositions;
+        
+        for (int i = 0; i < numInstructions; i++) {
+            InstructionType instrType = static_cast<InstructionType>(instrTypeDist(gen));
+            
+            // Limit FOR loop nesting to 3 levels
+            if (instrType == InstructionType::FOR_START && forNestingLevel >= 3) {
+                instrType = InstructionType::PRINT; // Default to PRINT instead
+            }
+            
+            Instruction instr(instrType);
+            
+            switch (instrType) {
+                case InstructionType::PRINT: {
+                    // Generate PRINT with variable or simple message
+                    if (variables.empty() || valueDist(gen) % 2 == 0) {
+                        instr.arg1 = "Hello world from " + name + "!";
+                    } else {
+                        // Print a variable
+                        auto varIt = variables.begin();
+                        std::advance(varIt, valueDist(gen) % variables.size());
+                        instr.arg1 = "Value from: " + varIt->first;
+                    }
+                    break;
+                }
+                case InstructionType::DECLARE: {
+                    instr.arg1 = generateRandomVariableName();
+                    instr.value = valueDist(gen);
+                    break;
+                }
+                case InstructionType::ADD:
+                case InstructionType::SUBTRACT: {
+                    instr.arg1 = generateRandomVariableName(); // Result variable
+                    instr.arg2 = generateRandomVariableName(); // First operand
+                    if (valueDist(gen) % 2 == 0) {
+                        instr.arg3 = generateRandomVariableName(); // Variable operand
+                    } else {
+                        instr.value = valueDist(gen); // Numeric operand
+                    }
+                    break;
+                }
+                case InstructionType::SLEEP: {
+                    instr.value = sleepDist(gen);
+                    break;
+                }
+                case InstructionType::FOR_START: {
+                    instr.value = forRepeatsDist(gen);
+                    instr.forLevel = forNestingLevel;
+                    forStartPositions.push_back(i);
+                    forNestingLevel++;
+                    break;
+                }
+                case InstructionType::FOR_END: {
+                    if (!forStartPositions.empty()) {
+                        forNestingLevel--;
+                        instr.forLevel = forNestingLevel;
+                        forStartPositions.pop_back();
+                    } else {
+                        // No matching FOR_START, convert to PRINT
+                        instr.type = InstructionType::PRINT;
+                        instr.arg1 = "Hello world from " + name + "!";
+                    }
+                    break;
+                }
+            }
+            
+            instructions.push_back(instr);
+        }
+        
+        // Close any unclosed FOR loops
+        while (!forStartPositions.empty()) {
+            Instruction endInstr(InstructionType::FOR_END);
+            endInstr.forLevel = --forNestingLevel;
+            instructions.push_back(endInstr);
+            forStartPositions.pop_back();
+            totalInstructions++;
+            remainingInstructions++;
+        }
+    }
+
+    void Process::executePrintInstruction(const Instruction& instr) {
+        std::ostringstream entry;
+        entry << getTimestamp() << " Core:" << assignedCore << " ";
+        
+        if (instr.arg1.find("Value from:") == 0) {
+            // Extract variable name and print its value
+            std::string varName = instr.arg1.substr(12); // Remove "Value from: "
+            uint16_t value = getVariableValue(varName);
+            entry << "\"" << instr.arg1 << " " << value << "\"";
+        } else {
+            entry << "\"" << instr.arg1 << "\"";
+        }
+        
+        logs.push_back(entry.str());
+    }
+
+    void Process::executeDeclareInstruction(const Instruction& instr) {
+        setVariableValue(instr.arg1, instr.value);
+        
+        std::ostringstream entry;
+        entry << getTimestamp() << " Core:" << assignedCore 
+              << " DECLARE " << instr.arg1 << " = " << instr.value;
+        logs.push_back(entry.str());
+    }
+
+    void Process::executeAddInstruction(const Instruction& instr) {
+        uint16_t operand1 = getVariableValue(instr.arg2);
+        uint16_t operand2 = instr.arg3.empty() ? instr.value : getVariableValue(instr.arg3);
+        
+        uint16_t result = operand1 + operand2;
+        setVariableValue(instr.arg1, result);
+        
+        std::ostringstream entry;
+        entry << getTimestamp() << " Core:" << assignedCore 
+              << " " << instr.arg1 << " = " << operand1 << " + " << operand2 << " = " << result;
+        logs.push_back(entry.str());
+    }
+
+    void Process::executeSubtractInstruction(const Instruction& instr) {
+        uint16_t operand1 = getVariableValue(instr.arg2);
+        uint16_t operand2 = instr.arg3.empty() ? instr.value : getVariableValue(instr.arg3);
+        
+        // Clamp to prevent underflow (uint16 range)
+        uint16_t result = (operand1 >= operand2) ? (operand1 - operand2) : 0;
+        setVariableValue(instr.arg1, result);
+        
+        std::ostringstream entry;
+        entry << getTimestamp() << " Core:" << assignedCore 
+              << " " << instr.arg1 << " = " << operand1 << " - " << operand2 << " = " << result;
+        logs.push_back(entry.str());
+    }
+
+    void Process::executeSleepInstruction(const Instruction& instr) {
+        sleepCyclesRemaining = instr.value;
+        status = ProcessStatus::Sleeping;  // Process will relinquish CPU
+        
+        std::ostringstream entry;
+        entry << getTimestamp() << " Core:" << assignedCore 
+              << " SLEEP " << instr.value << " cycles";
+        logs.push_back(entry.str());
+    }
+
+    void Process::executeForStartInstruction(const Instruction& instr) {
+        forLoopStack.push_back(currentInstructionIndex);
+        forCounterStack.push_back(instr.value);
+        
+        std::ostringstream entry;
+        entry << getTimestamp() << " Core:" << assignedCore 
+              << " FOR loop start (" << instr.value << " iterations)";
+        logs.push_back(entry.str());
+    }
+
+    void Process::executeForEndInstruction(const Instruction& instr) {
+        if (!forLoopStack.empty() && !forCounterStack.empty()) {
+            forCounterStack.back()--;
+            
+            if (forCounterStack.back() > 0) {
+                // Jump back to FOR_START
+                currentInstructionIndex = forLoopStack.back();
+            } else {
+                // Loop finished, clean up
+                forLoopStack.pop_back();
+                forCounterStack.pop_back();
+                
+                std::ostringstream entry;
+                entry << getTimestamp() << " Core:" << assignedCore 
+                      << " FOR loop end";
+                logs.push_back(entry.str());
+            }
+        }
+    }
+
+    uint16_t Process::getVariableValue(const std::string& varName) {
+        auto it = variables.find(varName);
+        if (it != variables.end()) {
+            return it->second;
+        }
+        // Auto-declare with value 0 if not found
+        variables[varName] = 0;
+        return 0;
+    }
+
+    void Process::setVariableValue(const std::string& varName, uint16_t value) {
+        // Clamp to uint16 range (0 to 65535)
+        variables[varName] = std::min(value, static_cast<uint16_t>(65535));
+    }
+
+    std::string Process::generateRandomVariableName() {
+        static std::vector<std::string> varNames = {"x", "y", "z", "a", "b", "c", "counter", "temp", "result", "sum"};
+        static std::random_device rd;
+        static std::mt19937 gen(rd());
+        std::uniform_int_distribution<> dist(0, varNames.size() - 1);
+        
+        return varNames[dist(gen)];
+    }
 
     // How many instructions are left
     int Process::getRemainingInstructions() const {
@@ -96,7 +350,7 @@
 
     // Has the process completed all its work?
     bool Process::hasFinished() const {
-        return remainingInstructions == 0;
+        return remainingInstructions == 0 || currentInstructionIndex >= instructions.size();
     }
 
     // Status and core management
@@ -107,7 +361,7 @@
     void Process::setStatus(ProcessStatus newStatus) {
         status = newStatus;
         // Auto-update to Finished status when no instructions remain
-        if (remainingInstructions == 0) {
+        if (remainingInstructions == 0 || currentInstructionIndex >= instructions.size()) {
             status = ProcessStatus::Finished;
         }
     }

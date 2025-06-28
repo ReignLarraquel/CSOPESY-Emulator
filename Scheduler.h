@@ -82,6 +82,7 @@ private:
     
     // Scheduling operations (clean, no deadlocks!)
     void handleProcessExecution();    // Execute instructions for running processes
+    void handleSleepingProcesses();   // Handle sleeping processes and wake them up
     void handleProcessCompletion();   // Remove finished processes
     void handleQuantumExpiration();   // Preempt processes whose quantum expired
     void scheduleWaitingProcesses();  // Assign waiting processes to available cores

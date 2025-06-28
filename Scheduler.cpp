@@ -17,7 +17,17 @@ CPUScheduler::CPUScheduler()
 }
 
 CPUScheduler::~CPUScheduler() {
-    stop();
+    // Force immediate stop for cleanup
+    schedulerRunning.store(false);
+    generatorRunning.store(false);
+    
+    // Wait for all threads to complete
+    if (tickThread.joinable()) {
+        tickThread.join();
+    }
+    if (generatorThread.joinable()) {
+        generatorThread.join();
+    }
 }
 
 void CPUScheduler::start() {
@@ -36,13 +46,18 @@ void CPUScheduler::start() {
 void CPUScheduler::stop() {
     if (!schedulerRunning.load()) return;
     
-    std::cout << "Stopping scheduler..." << std::endl;
-    schedulerRunning.store(false);
-    generatorRunning.store(false);
+    std::cout << "Stopping process generation..." << std::endl;
+    std::cout << "Scheduler will continue until all processes finish." << std::endl;
     
-    // Wait for all threads to complete
-    if (tickThread.joinable()) tickThread.join();
-    if (generatorThread.joinable()) generatorThread.join();
+    // Stop generating new processes immediately
+    generatorRunning.store(false);
+    if (generatorThread.joinable()) {
+        generatorThread.join();
+    }
+    
+    // Main scheduler will continue running until all processes finish
+    // The cpuTickManager will detect when to stop automatically
+    // DO NOT wait here - return control to user immediately
 }
 
 void CPUScheduler::addProcess(std::shared_ptr<Process> process) {
@@ -76,8 +91,22 @@ void CPUScheduler::cpuTickManager() {
         // NEW CLEAN ARCHITECTURE - NO DEADLOCKS!
         onCpuTick();
         
-        // Sleep for tick interval (100ms = 10 ticks per second)
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        // Check if scheduler-stop was called and all processes are finished
+        if (!generatorRunning.load()) {
+            // Check if all processes are finished (including sleeping ones)
+            auto runningProcesses = processManager.getProcessesByStatus(ProcessStatus::Running);
+            auto waitingProcesses = processManager.getProcessesByStatus(ProcessStatus::Waiting);
+            auto sleepingProcesses = processManager.getProcessesByStatus(ProcessStatus::Sleeping);
+            
+            if (runningProcesses.empty() && waitingProcesses.empty() && sleepingProcesses.empty()) {
+                std::cout << "All processes completed. Scheduler stopped." << std::endl;
+                schedulerRunning.store(false);
+                break;
+            }
+        }
+        
+        // Sleep for tick interval (1ms = 1000 ticks per second)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 }
 
@@ -86,13 +115,16 @@ void CPUScheduler::onCpuTick() {
     // Phase 1: Execute instructions for running processes
     handleProcessExecution();
     
-    // Phase 2: Handle completed processes
+    // Phase 2: Handle sleeping processes (decrement sleep counters)
+    handleSleepingProcesses();
+    
+    // Phase 3: Handle completed processes
     handleProcessCompletion();
     
-    // Phase 3: Handle quantum expiration (Round Robin)
+    // Phase 4: Handle quantum expiration (Round Robin)
     handleQuantumExpiration();
     
-    // Phase 4: Schedule new processes to available cores
+    // Phase 5: Schedule new processes to available cores
     scheduleWaitingProcesses();
 }
 
@@ -103,7 +135,7 @@ void CPUScheduler::handleProcessExecution() {
     // Execute one instruction for each running process
     auto results = processManager.executeInstructionsForProcesses(runningProcesses);
     
-    // Update core assignments for any processes that finished
+    // Update core assignments for any processes that finished or went to sleep
     for (const auto& result : results) {
         if (result.isFinished) {
             // Find which core this process was on and clear it
@@ -115,15 +147,50 @@ void CPUScheduler::handleProcessExecution() {
                 }
             }
         }
+        // Handle sleeping processes - they relinquish the CPU
+        else if (result.process && result.process->getStatus() == ProcessStatus::Sleeping) {
+            // Find which core this process was on and clear it
+            for (int coreId = 0; coreId < coreManager.getCoreCount(); coreId++) {
+                if (coreManager.getAssignment(coreId) == result.name) {
+                    coreManager.clearAssignment(coreId);
+                    processManager.setProcessCore(result.name, -1);  // Remove from core
+                    break;
+                }
+            }
+        }
+    }
+}
+
+void CPUScheduler::handleSleepingProcesses() {
+    // Get all sleeping processes and update their sleep counters
+    auto sleepingProcesses = processManager.getProcessesByStatus(ProcessStatus::Sleeping);
+    
+    for (const String& processName : sleepingProcesses) {
+        auto process = processManager.getProcess(processName);
+        if (process && process->getRemainingInstructions() > 0) {
+            // Process decrements its own sleep counter in executeInstruction
+            // When sleep ends, process automatically returns to Waiting status
+            process->executeInstruction();
+            
+            // If sleep finished, add back to waiting queue
+            if (process->getStatus() == ProcessStatus::Waiting) {
+                std::lock_guard<std::mutex> queueLock(queueMutex);
+                String algorithm = Config::getScheduler();
+                
+                if (algorithm == "fcfs") {
+                    fcfsQueue.push(processName);
+                } else if (algorithm == "rr") {
+                    roundRobinQueue.push_back(processName);
+                }
+            }
+        }
     }
 }
 
 void CPUScheduler::handleProcessCompletion() {
-    // Remove finished processes from process manager
-    auto finishedProcesses = processManager.getProcessesByStatus(ProcessStatus::Finished);
-    for (const String& processName : finishedProcesses) {
-        processManager.removeProcess(processName);
-    }
+    // Note: Keep finished processes in ProcessManager for reporting purposes
+    // They should only be removed from cores/queues, not from memory
+    // This allows 'screen -ls' and 'report-util' to show completed processes
 }
 
 void CPUScheduler::handleQuantumExpiration() {
@@ -139,21 +206,26 @@ void CPUScheduler::handleQuantumExpiration() {
     std::vector<String> preemptedProcesses;
     for (const auto& coreInfo : coreInfos) {
         if (coreInfo.quantumExpired) {
-            // Preempt this process
+            // Clear core assignment FIRST
+            coreManager.clearAssignment(coreInfo.coreId);
+            
+            // Then update process state (core should be -1 AFTER status change)
             processManager.updateProcessStatus(coreInfo.processName, ProcessStatus::Waiting);
             processManager.setProcessCore(coreInfo.processName, -1);
-            coreManager.clearAssignment(coreInfo.coreId);
             
             // Add back to Round Robin queue
             preemptedProcesses.push_back(coreInfo.processName);
         }
     }
     
-    // Add preempted processes back to queue
+    // Add preempted processes back to queue (exclude finished ones)
     if (!preemptedProcesses.empty()) {
         std::lock_guard<std::mutex> queueLock(queueMutex);
         for (const String& processName : preemptedProcesses) {
-            roundRobinQueue.push_back(processName);
+            auto process = processManager.getProcess(processName);
+            if (process && process->getStatus() != ProcessStatus::Finished) {
+                roundRobinQueue.push_back(processName);
+            }
         }
     }
 }
@@ -178,6 +250,13 @@ void CPUScheduler::scheduleWaitingProcesses() {
         
         // Assign process to core if we found one
         if (!processName.empty() && processManager.hasProcess(processName)) {
+            auto process = processManager.getProcess(processName);
+            
+            // Skip finished processes - don't reschedule them
+            if (process && process->getStatus() == ProcessStatus::Finished) {
+                continue;
+            }
+            
             if (coreManager.tryAssignProcess(coreId, processName)) {
                 processManager.updateProcessStatus(processName, ProcessStatus::Running);
                 processManager.setProcessCore(processName, coreId);
@@ -215,13 +294,13 @@ void CPUScheduler::processGenerator() {
         addProcess(process);
         
         // Wait for next generation cycle
-        std::this_thread::sleep_for(std::chrono::milliseconds(frequency * 100));
+        std::this_thread::sleep_for(std::chrono::milliseconds(frequency * 1));
     }
 }
 
 String CPUScheduler::generateProcessName() {
     std::ostringstream oss;
-    oss << "process" << std::setfill('0') << std::setw(2) << nextProcessId++;
+    oss << "p" << std::setfill('0') << std::setw(2) << nextProcessId++;
     return oss.str();
 }
 

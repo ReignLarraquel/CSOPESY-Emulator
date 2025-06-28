@@ -29,6 +29,11 @@ void ProcessManager::updateProcessStatus(const String& processName, ProcessStatu
     auto process = getProcessUnsafe(processName);
     if (process) {
         process->setStatus(status);
+        
+        // Ensure consistency: if setting to Waiting or Sleeping, core should be -1
+        if (status == ProcessStatus::Waiting || status == ProcessStatus::Sleeping) {
+            process->setAssignedCore(-1);
+        }
     }
 }
 
@@ -55,12 +60,25 @@ std::shared_ptr<Process> ProcessManager::getProcess(const String& processName) c
 
 std::vector<String> ProcessManager::getProcessesByStatus(ProcessStatus status) const {
     std::lock_guard<std::mutex> lock(processMutex);
-    std::vector<String> result;
+    std::vector<std::pair<String, std::shared_ptr<Process>>> filteredProcesses;
     
+    // First, collect processes with matching status
     for (const auto& [name, process] : processMap) {
         if (process && process->getStatus() == status) {
-            result.push_back(name);
+            filteredProcesses.push_back({name, process});
         }
+    }
+    
+    // Sort by creation time (chronological order)
+    std::sort(filteredProcesses.begin(), filteredProcesses.end(),
+        [](const auto& a, const auto& b) {
+            return a.second->getCreationTime() < b.second->getCreationTime();
+        });
+    
+    // Extract just the names
+    std::vector<String> result;
+    for (const auto& [name, process] : filteredProcesses) {
+        result.push_back(name);
     }
     
     return result;
