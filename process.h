@@ -4,6 +4,13 @@
 #include <string>
 #include <vector>
 
+// Process status enumeration
+enum class ProcessStatus {
+    Waiting,    
+    Running,    
+    Finished    
+};
+
 // A simple Process class that tracks execution instructions, logs, and progress.
 class Process {
 private:
@@ -12,27 +19,28 @@ private:
     int totalInstructions;        // How many instructions it started with
     int remainingInstructions;    // How many are left to execute
     std::vector<std::string> logs;      // Stored log entries
+    ProcessStatus status;         // Current execution status
+    int assignedCore;             // Which CPU core is running this (-1 if none)
+    std::string creationTime;     // Timestamp when process was created
 
 
 public:
     // Constructor: initializes all fields
     Process(const std::string& processName, int processId, int numInstructions);
 
-    // Print summary of the process (name, ID, progress)
+
     void printProcess() const;
-
-    // Get a timestamp string in format (MM/DD/YYYY hh:mm:ssAM/PM)
     std::string getTimestamp() const;
-
-    // Display all collected log entries with timestamps and core info
     void displayLogs() const;
-
-    // Execute one instruction (if any remain) and record a log entry
     void executeInstruction();
-
-    // How many instructions are left
     int getRemainingInstructions() const;
-
-    // Has the process completed all its work?
     bool hasFinished() const;
+    ProcessStatus getStatus() const;
+    void setStatus(ProcessStatus newStatus);
+    int getAssignedCore() const;
+    void setAssignedCore(int coreId);
+    const std::string& getName() const;
+    int getId() const;
+    int getTotalInstructions() const;
+    const std::string& getCreationTime() const;
 };

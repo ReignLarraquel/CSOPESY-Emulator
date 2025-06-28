@@ -1,16 +1,23 @@
 #include "ConsoleManager.h"
 #include "MainConsole.h"
+#include "ProcessConsole.h"
+#include "Config.h"
 #include <iostream>
 #include <sstream>
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
+#include <iomanip>
+#include <fstream>
 
 MainConsole::MainConsole() : AConsole(MAIN_CONSOLE) {
     isSystemInitialized = false;
+    nextProcessId = 1;
+    scheduler = std::make_unique<CPUScheduler>();
 }
 
 void MainConsole::onEnabled() {
-    // Called when switching to this console
+    // Called when switching to this console - show full interface
     display();
 }
 
@@ -24,15 +31,19 @@ void MainConsole::display() {
 
 void MainConsole::process() {
     String input;
-    std::cout << "> ";
     std::getline(std::cin, input);
     
     if (!input.empty()) {
         bool shouldExit = handleCommand(input);
         if (shouldExit) {
             ConsoleManager::getInstance()->exitApplication();
+            return;
         }
     }
+    
+    // Show prompt for next command
+    std::cout << "> ";
+    std::cout.flush();
 }
 
 bool MainConsole::handleCommand(const String& command) {
@@ -92,12 +103,22 @@ std::vector<String> MainConsole::parseCommand(const String& command) {
     return args;
 }
 
+String MainConsole::toLower(const String& str) {
+    String result = str;
+    std::transform(result.begin(), result.end(), result.begin(), ::tolower);
+    return result;
+}
+
 void MainConsole::initializeSystem() {
     std::cout << "Initializing system from config.txt..." << std::endl;
     
-    // TODO: Read config.txt and initialize system parameters
-    isSystemInitialized = true;
+    // Load configuration from config.txt
+    bool configLoaded = Config::loadFromFile("config.txt");
+    if (!configLoaded) {
+        std::cout << "\033[33mUsing default configuration values.\033[0m" << std::endl;
+    }
     
+    isSystemInitialized = true;
     std::cout << "\033[32mSystem initialized successfully!\033[0m" << std::endl;
 }
 
@@ -106,6 +127,7 @@ void MainConsole::exitSystem() {
 }
 
 void MainConsole::clearConsole() {
+    // Only clear when user explicitly types "clear" command
     display();
 }
 
@@ -132,53 +154,184 @@ void MainConsole::handleScreenCommand(const std::vector<String>& args) {
 }
 
 void MainConsole::startScheduler() {
-    std::cout << "Starting process scheduler..." << std::endl;
-    // TODO: Implement scheduler starting logic
-    std::cout << "\033[32mScheduler started!\033[0m" << std::endl;
+    if (!scheduler->isRunning()) {
+        scheduler->start();
+        scheduler->startProcessGeneration();
+        std::cout << "\033[32mScheduler started!\033[0m" << std::endl;
+    } else {
+        std::cout << "\033[33mScheduler is already running.\033[0m" << std::endl;
+    }
 }
 
 void MainConsole::stopScheduler() {
-    std::cout << "Stopping process scheduler..." << std::endl;
-    // TODO: Implement scheduler stopping logic
-    std::cout << "\033[32mScheduler stopped!\033[0m" << std::endl;
+    if (scheduler->isRunning()) {
+        scheduler->stopProcessGeneration();
+        scheduler->stop();
+        std::cout << "\033[32mScheduler stopped!\033[0m" << std::endl;
+    } else {
+        std::cout << "\033[33mScheduler is not running.\033[0m" << std::endl;
+    }
 }
 
 void MainConsole::generateReport() {
     std::cout << "Generating CPU utilization report..." << std::endl;
-    // TODO: Implement report generation
+    
+    std::ofstream reportFile("csopesy-log.txt");
+    if (!reportFile.is_open()) {
+        showErrorMessage("Could not create csopesy-log.txt");
+        return;
+    }
+    
+    // Get real CPU utilization from scheduler
+    double cpuUtil = scheduler->getCpuUtilization();
+    int coresUsed = scheduler->getCoresUsed();
+    int coresAvailable = scheduler->getCoresAvailable();
+    
+    // Write report header
+    reportFile << "CPU utilization: " << std::fixed << std::setprecision(0) << cpuUtil << "%" << std::endl;
+    reportFile << "Cores used: " << coresUsed << std::endl;
+    reportFile << "Cores available: " << coresAvailable << std::endl;
+    reportFile << "--------------------------------------" << std::endl;
+    
+    // Get processes by status from scheduler
+    auto runningProcesses = scheduler->getProcessesByStatus(ProcessStatus::Running);
+    auto waitingProcesses = scheduler->getProcessesByStatus(ProcessStatus::Waiting);
+    auto finishedProcesses = scheduler->getProcessesByStatus(ProcessStatus::Finished);
+    
+    // Write running processes
+    reportFile << "\nRunning processes:" << std::endl;
+    for (const String& processName : runningProcesses) {
+        auto process = scheduler->getProcess(processName);
+        if (process) {
+            int currentLine = process->getTotalInstructions() - process->getRemainingInstructions();
+            reportFile << processName << "\t(" << process->getCreationTime() << ")\t"
+                      << "Core:" << process->getAssignedCore() << "\t"
+                      << currentLine << " / " << process->getTotalInstructions() << std::endl;
+        }
+    }
+    
+    // Write waiting processes
+    reportFile << "\nWaiting processes:" << std::endl;
+    for (const String& processName : waitingProcesses) {
+        auto process = scheduler->getProcess(processName);
+        if (process) {
+            int currentLine = process->getTotalInstructions() - process->getRemainingInstructions();
+            reportFile << processName << "\t(" << process->getCreationTime() << ")\t"
+                      << currentLine << " / " << process->getTotalInstructions() << std::endl;
+        }
+    }
+    
+    // Write finished processes
+    reportFile << "\nFinished processes:" << std::endl;
+    for (const String& processName : finishedProcesses) {
+        auto process = scheduler->getProcess(processName);
+        if (process) {
+            reportFile << processName << "\t(" << process->getCreationTime() << ")\t"
+                      << "Finished\t" << process->getTotalInstructions() 
+                      << " / " << process->getTotalInstructions() << std::endl;
+        }
+    }
+    
+    reportFile << "--------------------------------------" << std::endl;
+    reportFile.close();
+    
     std::cout << "\033[32mReport generated: csopesy-log.txt\033[0m" << std::endl;
 }
 
 void MainConsole::createProcess(const String& processName) {
+    // Check if process already exists
+    if (scheduler->hasProcess(processName)) {
+        showErrorMessage("Process " + processName + " already exists.");
+        return;
+    }
+    
     std::cout << "Creating process: " << processName << std::endl;
-    // TODO: Create process and add to scheduler
+    
+    // Use config values for instruction count
+    int minIns = Config::getMinIns();
+    int maxIns = Config::getMaxIns();
+    int numInstructions = minIns + (rand() % (maxIns - minIns + 1));
+    
+    auto newProcess = std::make_shared<Process>(processName, nextProcessId++, numInstructions);
+    
+    // Add to scheduler (which now handles everything)
+    scheduler->addProcess(newProcess);
+    
     std::cout << "\033[32mProcess " << processName << " created successfully!\033[0m" << std::endl;
+    std::cout << "Instructions: " << numInstructions << " | ID: " << newProcess->getId() << std::endl;
 }
 
 void MainConsole::listProcesses() {
-    std::cout << "\n=== Process List ===" << std::endl;
-    std::cout << "CPU Utilization: 0%" << std::endl;
-    std::cout << "Cores used: 0" << std::endl;
-    std::cout << "Cores available: 4" << std::endl;
+    // Get real CPU utilization from scheduler
+    double cpuUtil = scheduler->getCpuUtilization();
+    int coresUsed = scheduler->getCoresUsed();
+    int coresAvailable = scheduler->getCoresAvailable();
+    
+    std::cout << "CPU utilization: " << std::fixed << std::setprecision(0) << cpuUtil << "%" << std::endl;
+    std::cout << "Cores used: " << coresUsed << std::endl;
+    std::cout << "Cores available: " << coresAvailable << std::endl;
+    std::cout << "--------------------------------------" << std::endl;
+    
+    // Get processes by status from scheduler
+    auto runningProcesses = scheduler->getProcessesByStatus(ProcessStatus::Running);
+    auto waitingProcesses = scheduler->getProcessesByStatus(ProcessStatus::Waiting);
+    auto finishedProcesses = scheduler->getProcessesByStatus(ProcessStatus::Finished);
+    
     std::cout << "\nRunning processes:" << std::endl;
-    // TODO: List actual running processes
-    std::cout << "No running processes." << std::endl;
+    for (const String& processName : runningProcesses) {
+        auto process = scheduler->getProcess(processName);
+        if (process) {
+            int currentLine = process->getTotalInstructions() - process->getRemainingInstructions();
+            std::cout << processName << "\t(" << process->getCreationTime() << ")\t"
+                     << "Core:" << process->getAssignedCore() << "\t"
+                     << currentLine << " / " << process->getTotalInstructions() << std::endl;
+        }
+    }
+    
+    std::cout << "\nWaiting processes:" << std::endl;
+    for (const String& processName : waitingProcesses) {
+        auto process = scheduler->getProcess(processName);
+        if (process) {
+            int currentLine = process->getTotalInstructions() - process->getRemainingInstructions();
+            std::cout << processName << "\t(" << process->getCreationTime() << ")\t"
+                     << currentLine << " / " << process->getTotalInstructions() << std::endl;
+        }
+    }
     
     std::cout << "\nFinished processes:" << std::endl;
-    // TODO: List actual finished processes
-    std::cout << "No finished processes." << std::endl;
-    std::cout << "===================" << std::endl;
+    for (const String& processName : finishedProcesses) {
+        auto process = scheduler->getProcess(processName);
+        if (process) {
+            std::cout << processName << "\t(" << process->getCreationTime() << ")\t"
+                     << "Finished\t" << process->getTotalInstructions() 
+                     << " / " << process->getTotalInstructions() << std::endl;
+        }
+    }
+    
+    std::cout << "--------------------------------------" << std::endl;
 }
 
 void MainConsole::attachToProcess(const String& processName) {
-    // TODO: Check if process exists
-    std::cout << "Attaching to process: " << processName << std::endl;
+    // Check if process exists
+    auto process = scheduler->getProcess(processName);
+    if (!process) {
+        showErrorMessage("Process " + processName + " not found.");
+        return;
+    }
     
-    // For now, show error since we haven't implemented process consoles yet
-    showErrorMessage("Process " + processName + " not found.");
+    // Check if process is finished
+    if (process->getStatus() == ProcessStatus::Finished) {
+        showErrorMessage("Process " + processName + " not found.");
+        return;
+    }
     
-    // TODO: Switch to process console when implemented
-    // ConsoleManager::getInstance()->switchConsole("PROCESS_" + processName);
+    // Create and register ProcessConsole for this process
+    String consoleName = "PROCESS_" + processName;
+    auto processConsole = std::make_shared<ProcessConsole>(process);
+    
+    // Register the console dynamically and switch to it
+    ConsoleManager::getInstance()->registerConsole(consoleName, processConsole);
+    ConsoleManager::getInstance()->switchConsole(consoleName);
 }
 
 void MainConsole::showWelcomeMessage() {
@@ -201,7 +354,8 @@ void MainConsole::showLogo() {
 }
 
 void MainConsole::showCommandPrompt() {
-    // Command prompt is shown in process() method
+    std::cout << "> ";
+    std::cout.flush();  // Ensure prompt appears immediately
 }
 
 void MainConsole::showErrorMessage(const String& error) {
@@ -210,10 +364,4 @@ void MainConsole::showErrorMessage(const String& error) {
 
 void MainConsole::showUninitializedError() {
     std::cout << "\033[31mError: System not initialized. Please run 'initialize' first.\033[0m" << std::endl;
-}
-
-String MainConsole::toLower(const String& str) {
-    String result = str;
-    std::transform(result.begin(), result.end(), result.begin(), ::tolower);
-    return result;
 } 

@@ -1,0 +1,282 @@
+#include "Scheduler.h"
+#include "Config.h"
+#include <random>
+#include <sstream>
+#include <iomanip>
+#include <iostream>
+
+CPUScheduler::CPUScheduler() 
+    : processManager(),
+      coreManager(Config::getNumCpu()),
+      schedulerRunning(false), 
+      generatorRunning(false), 
+      cpuTicks(0), 
+      nextProcessId(1) {
+    
+    startTime = std::chrono::steady_clock::now();
+}
+
+CPUScheduler::~CPUScheduler() {
+    stop();
+}
+
+void CPUScheduler::start() {
+    if (schedulerRunning.load()) return;
+    
+    schedulerRunning.store(true);
+    String algorithm = Config::getScheduler();
+    
+    std::cout << "Starting " << algorithm << " scheduler with " 
+              << coreManager.getCoreCount() << " cores..." << std::endl;
+    
+    // Start the master CPU tick thread
+    tickThread = std::thread(&CPUScheduler::cpuTickManager, this);
+}
+
+void CPUScheduler::stop() {
+    if (!schedulerRunning.load()) return;
+    
+    std::cout << "Stopping scheduler..." << std::endl;
+    schedulerRunning.store(false);
+    generatorRunning.store(false);
+    
+    // Wait for all threads to complete
+    if (tickThread.joinable()) tickThread.join();
+    if (generatorThread.joinable()) generatorThread.join();
+}
+
+void CPUScheduler::addProcess(std::shared_ptr<Process> process) {
+    if (!process) return;
+    
+    String name = process->getName();
+    
+    // Add to process manager
+    processManager.addProcess(process);
+    
+    // Add to appropriate queue
+    {
+        std::lock_guard<std::mutex> queueLock(queueMutex);
+        String algorithm = Config::getScheduler();
+        
+        if (algorithm == "fcfs") {
+            fcfsQueue.push(name);
+        } else if (algorithm == "rr") {
+            roundRobinQueue.push_back(name);
+        }
+    }
+    
+    process->setStatus(ProcessStatus::Waiting);
+}
+
+// MASTER CPU TICK MANAGER - DRIVES THE ENTIRE SYSTEM!
+void CPUScheduler::cpuTickManager() {
+    while (schedulerRunning.load()) {
+        cpuTicks++;
+        
+        // NEW CLEAN ARCHITECTURE - NO DEADLOCKS!
+        onCpuTick();
+        
+        // Sleep for tick interval (100ms = 10 ticks per second)
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+}
+
+// CALLED EVERY CPU TICK - CLEAN SEPARATION OF CONCERNS!
+void CPUScheduler::onCpuTick() {
+    // Phase 1: Execute instructions for running processes
+    handleProcessExecution();
+    
+    // Phase 2: Handle completed processes
+    handleProcessCompletion();
+    
+    // Phase 3: Handle quantum expiration (Round Robin)
+    handleQuantumExpiration();
+    
+    // Phase 4: Schedule new processes to available cores
+    scheduleWaitingProcesses();
+}
+
+void CPUScheduler::handleProcessExecution() {
+    // Get all currently running processes
+    auto runningProcesses = coreManager.getNonEmptyAssignments();
+    
+    // Execute one instruction for each running process
+    auto results = processManager.executeInstructionsForProcesses(runningProcesses);
+    
+    // Update core assignments for any processes that finished
+    for (const auto& result : results) {
+        if (result.isFinished) {
+            // Find which core this process was on and clear it
+            for (int coreId = 0; coreId < coreManager.getCoreCount(); coreId++) {
+                if (coreManager.getAssignment(coreId) == result.name) {
+                    coreManager.clearAssignment(coreId);
+                    processManager.updateProcessStatus(result.name, ProcessStatus::Finished);
+                    break;
+                }
+            }
+        }
+    }
+}
+
+void CPUScheduler::handleProcessCompletion() {
+    // Remove finished processes from process manager
+    auto finishedProcesses = processManager.getProcessesByStatus(ProcessStatus::Finished);
+    for (const String& processName : finishedProcesses) {
+        processManager.removeProcess(processName);
+    }
+}
+
+void CPUScheduler::handleQuantumExpiration() {
+    String algorithm = Config::getScheduler();
+    if (algorithm != "rr") return;  // Only for Round Robin
+    
+    // Update quantum for all cores
+    coreManager.updateQuantums();
+    
+    // Get cores with expired quantum
+    auto coreInfos = coreManager.getActiveProcessesWithQuantum();
+    
+    std::vector<String> preemptedProcesses;
+    for (const auto& coreInfo : coreInfos) {
+        if (coreInfo.quantumExpired) {
+            // Preempt this process
+            processManager.updateProcessStatus(coreInfo.processName, ProcessStatus::Waiting);
+            processManager.setProcessCore(coreInfo.processName, -1);
+            coreManager.clearAssignment(coreInfo.coreId);
+            
+            // Add back to Round Robin queue
+            preemptedProcesses.push_back(coreInfo.processName);
+        }
+    }
+    
+    // Add preempted processes back to queue
+    if (!preemptedProcesses.empty()) {
+        std::lock_guard<std::mutex> queueLock(queueMutex);
+        for (const String& processName : preemptedProcesses) {
+            roundRobinQueue.push_back(processName);
+        }
+    }
+}
+
+void CPUScheduler::scheduleWaitingProcesses() {
+    std::lock_guard<std::mutex> queueLock(queueMutex);
+    
+    String algorithm = Config::getScheduler();
+    auto availableCores = coreManager.getAvailableCores();
+    
+    for (int coreId : availableCores) {
+        String processName = "";
+        
+        // Get next process from appropriate queue
+        if (algorithm == "fcfs" && !fcfsQueue.empty()) {
+            processName = fcfsQueue.front();
+            fcfsQueue.pop();
+        } else if (algorithm == "rr" && !roundRobinQueue.empty()) {
+            processName = roundRobinQueue.front();
+            roundRobinQueue.pop_front();
+        }
+        
+        // Assign process to core if we found one
+        if (!processName.empty() && processManager.hasProcess(processName)) {
+            if (coreManager.tryAssignProcess(coreId, processName)) {
+                processManager.updateProcessStatus(processName, ProcessStatus::Running);
+                processManager.setProcessCore(processName, coreId);
+                
+                // Set quantum for Round Robin
+                if (algorithm == "rr") {
+                    coreManager.setQuantum(coreId, Config::getQuantumCycles());
+                }
+            }
+        }
+    }
+}
+
+void CPUScheduler::startProcessGeneration() {
+    if (generatorRunning.load()) return;
+    
+    generatorRunning.store(true);
+    generatorThread = std::thread(&CPUScheduler::processGenerator, this);
+}
+
+void CPUScheduler::stopProcessGeneration() {
+    generatorRunning.store(false);
+    if (generatorThread.joinable()) {
+        generatorThread.join();
+    }
+}
+
+void CPUScheduler::processGenerator() {
+    while (generatorRunning.load()) {
+        int frequency = Config::getBatchProcessFreq();
+        
+        // Generate new process
+        String processName = generateProcessName();
+        auto process = createRandomProcess(processName);
+        addProcess(process);
+        
+        // Wait for next generation cycle
+        std::this_thread::sleep_for(std::chrono::milliseconds(frequency * 100));
+    }
+}
+
+String CPUScheduler::generateProcessName() {
+    std::ostringstream oss;
+    oss << "process" << std::setfill('0') << std::setw(2) << nextProcessId++;
+    return oss.str();
+}
+
+std::shared_ptr<Process> CPUScheduler::createRandomProcess(const String& name) {
+    int minIns = Config::getMinIns();
+    int maxIns = Config::getMaxIns();
+    
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<> dis(minIns, maxIns);
+    
+    int numInstructions = dis(gen);
+    return std::make_shared<Process>(name, nextProcessId - 1, numInstructions);
+}
+
+// Utility functions
+bool CPUScheduler::isRunning() const { 
+    return schedulerRunning.load(); 
+}
+
+double CPUScheduler::getCpuUtilization() const {
+    int usedCores = coreManager.getUsedCoreCount();
+    int totalCores = coreManager.getCoreCount();
+    return totalCores > 0 ? (double(usedCores) / totalCores) * 100.0 : 0.0;
+}
+
+int CPUScheduler::getCoresUsed() const {
+    return coreManager.getUsedCoreCount();
+}
+
+int CPUScheduler::getCoresAvailable() const {
+    return coreManager.getAvailableCoreCount();
+}
+
+std::vector<int> CPUScheduler::getActiveCores() const {
+    return coreManager.getUsedCores();
+}
+
+void CPUScheduler::removeProcess(const String& processName) {
+    processManager.removeProcess(processName);
+}
+
+// Process information delegation methods
+std::shared_ptr<Process> CPUScheduler::getProcess(const String& processName) const {
+    return processManager.getProcess(processName);
+}
+
+std::vector<String> CPUScheduler::getProcessesByStatus(ProcessStatus status) const {
+    return processManager.getProcessesByStatus(status);
+}
+
+std::vector<String> CPUScheduler::getAllProcessNames() const {
+    return processManager.getAllProcessNames();
+}
+
+bool CPUScheduler::hasProcess(const String& processName) const {
+    return processManager.hasProcess(processName);
+} 

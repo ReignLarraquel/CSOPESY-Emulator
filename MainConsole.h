@@ -1,7 +1,11 @@
 #pragma once
 #include "TypedefRepo.h"
 #include "AConsole.h"
+#include "process.h"
+#include "Scheduler.h"
 #include <vector>
+#include <memory>
+#include <map>
 
 class MainConsole : public AConsole {
 public:
@@ -15,6 +19,10 @@ public:
 private:
     // State management
     bool isSystemInitialized;
+    
+    // Scheduler system (now handles all process management)
+    std::unique_ptr<CPUScheduler> scheduler;
+    int nextProcessId;
     
     // Command handling
     bool handleCommand(const String& command);

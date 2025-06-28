@@ -2,13 +2,13 @@
 #include "ConsoleManager.h"
 #include "MainConsole.h"
 #include "MarqueeConsole.h"
-#include "SchedulingConsole.h"
+#include "ProcessConsole.h"
 //#include "MemorySimulationConsole.h"
 
 // Static member definition
 ConsoleManager* ConsoleManager::sharedInstance = nullptr;
 
-ConsoleManager::ConsoleManager() 
+ConsoleManager::ConsoleManager()
     : running(true), currentConsole(nullptr), previousConsole(nullptr)
 {
     // Grab Win32 console handle
@@ -17,13 +17,13 @@ ConsoleManager::ConsoleManager()
     // Create each concrete console
     auto mainConsole = std::make_shared<MainConsole>();
     auto marqueeConsole = std::make_shared<MarqueeConsole>();
-    auto schedulingConsole = std::make_shared<SchedulingConsole>();
+    auto processConsole = std::make_shared<ProcessConsole>();  // General process console
     //auto memoryConsole = std::make_shared<MemorySimulationConsole>();
 
     // Register them by name
     consoleTable[MAIN_CONSOLE] = mainConsole;
     consoleTable[MARQUEE_CONSOLE] = marqueeConsole;
-    consoleTable[SCHEDULING_CONSOLE] = schedulingConsole;
+    consoleTable[PROCESS_CONSOLE] = processConsole;
     //consoleTable[MEMORY_CONSOLE] = memoryConsole;
 
     // Activate the main screen initially
@@ -96,4 +96,15 @@ HANDLE ConsoleManager::getConsoleHandle() const {
 void ConsoleManager::setCursorPosition(int posX, int posY) const {
     //COORD coord = { static_cast<SHORT>(posX), static_cast<SHORT>(posY) };
     //SetConsoleCursorPosition(consoleHandle, coord);
+}
+
+void ConsoleManager::registerConsole(const String& consoleName, std::shared_ptr<AConsole> console) {
+    consoleTable[consoleName] = console;
+}
+
+void ConsoleManager::unregisterConsole(const String& consoleName) {
+    auto it = consoleTable.find(consoleName);
+    if (it != consoleTable.end()) {
+        consoleTable.erase(it);
+    }
 }

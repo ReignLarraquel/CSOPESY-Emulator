@@ -1,18 +1,18 @@
-#include "Process.h"
-
-#pragma once
-#include <iostream>
+#include "process.h"
+#include "Config.h"
 #include <chrono>
 #include <ctime>
 #include <iomanip>
 #include <sstream>
-#include <vector>
-#include <string>
+#include <thread>
 
 
-    // Constructor: initializes all four fields
+    // Constructor: initializes all fields
     Process::Process(const std::string& processName, int processId, int numInstructions)
-        : name(processName), id(processId), totalInstructions(numInstructions), remainingInstructions(numInstructions) {}
+        : name(processName), id(processId), totalInstructions(numInstructions), 
+          remainingInstructions(numInstructions), status(ProcessStatus::Waiting), assignedCore(-1) {
+        creationTime = getTimestamp();
+    }
 
     void Process::printProcess() const {
         std::cout << "Process name: " << name << "\n";
@@ -70,11 +70,22 @@
     void Process::executeInstruction() {
         if (remainingInstructions <= 0) return;
 
+        // Apply delay-per-exec configuration
+        int delay = Config::getDelayPerExec();
+        if (delay > 0) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(delay));
+        }
+
         --remainingInstructions;
         std::ostringstream entry;
-        entry << getTimestamp()
-            << " \"Hello world from " << name << "!\"";
+        entry << getTimestamp()  // Current execution time, not creation time
+            << " Core:" << assignedCore << " \"Hello world from " << name << "!\"";
         logs.push_back(entry.str());
+        
+        // Auto-update status when finished
+        if (remainingInstructions == 0) {
+            status = ProcessStatus::Finished;
+        }
     }
 
 
@@ -86,4 +97,41 @@
     // Has the process completed all its work?
     bool Process::hasFinished() const {
         return remainingInstructions == 0;
+    }
+
+    // Status and core management
+    ProcessStatus Process::getStatus() const {
+        return status;
+    }
+
+    void Process::setStatus(ProcessStatus newStatus) {
+        status = newStatus;
+        // Auto-update to Finished status when no instructions remain
+        if (remainingInstructions == 0) {
+            status = ProcessStatus::Finished;
+        }
+    }
+
+    int Process::getAssignedCore() const {
+        return assignedCore;
+    }
+
+    void Process::setAssignedCore(int coreId) {
+        assignedCore = coreId;
+    }
+
+    const std::string& Process::getName() const {
+        return name;
+    }
+
+    int Process::getId() const {
+        return id;
+    }
+
+    int Process::getTotalInstructions() const {
+        return totalInstructions;
+    }
+
+    const std::string& Process::getCreationTime() const {
+        return creationTime;
     }

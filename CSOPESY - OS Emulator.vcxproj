@@ -125,24 +125,29 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="AConsole.cpp" />
+    <ClCompile Include="Config.cpp" />
     <ClCompile Include="ConsoleManager.cpp" />
-    <ClCompile Include="main.cpp" />
-    <ClCompile Include="OLDCODE.cpp" />
-    <ClCompile Include="Process.cpp" />
-    <ClCompile Include="ScreenSession.cpp" />
-  </ItemGroup>
-  <ItemGroup>
-    <ClInclude Include="Process.h" />
+    <ClCompile Include="CoreManager.cpp" />
     <ClCompile Include="MainConsole.cpp" />
     <ClCompile Include="MarqueeConsole.cpp" />
-    <ClCompile Include="SchedulingConsole.cpp" />
+    <ClCompile Include="ProcessConsole.cpp" />
+    <ClCompile Include="ProcessManager.cpp" />
+    <ClCompile Include="process.cpp" />
+    <ClCompile Include="Scheduler.cpp" />
+    <ClCompile Include="ScreenSession.cpp" />
+    <ClCompile Include="main.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="AConsole.h" />
+    <ClInclude Include="Config.h" />
     <ClInclude Include="ConsoleManager.h" />
+    <ClInclude Include="CoreManager.h" />
     <ClInclude Include="MainConsole.h" />
     <ClInclude Include="MarqueeConsole.h" />
-    <ClInclude Include="SchedulingConsole.h" />
+    <ClInclude Include="ProcessConsole.h" />
+    <ClInclude Include="ProcessManager.h" />
+    <ClInclude Include="process.h" />
+    <ClInclude Include="Scheduler.h" />
     <ClInclude Include="ScreenSession.h" />
     <ClInclude Include="TypedefRepo.h" />
   </ItemGroup>
