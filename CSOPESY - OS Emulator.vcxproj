@@ -128,10 +128,11 @@
     <ClCompile Include="ConsoleManager.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="OLDCODE.cpp" />
-    <ClCompile Include="process.cpp" />
+    <ClCompile Include="Process.cpp" />
+    <ClCompile Include="ScreenSession.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="process.h" />
+    <ClInclude Include="Process.h" />
     <ClCompile Include="MainConsole.cpp" />
     <ClCompile Include="MarqueeConsole.cpp" />
     <ClCompile Include="SchedulingConsole.cpp" />
@@ -142,6 +143,7 @@
     <ClInclude Include="MainConsole.h" />
     <ClInclude Include="MarqueeConsole.h" />
     <ClInclude Include="SchedulingConsole.h" />
+    <ClInclude Include="ScreenSession.h" />
     <ClInclude Include="TypedefRepo.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

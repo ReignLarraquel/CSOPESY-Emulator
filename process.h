@@ -11,6 +11,8 @@ private:
     int id;                       // Numeric process identifier
     int totalInstructions;        // How many instructions it started with
     int remainingInstructions;    // How many are left to execute
+    std::vector<std::string> logs;      // Stored log entries
+
 
 public:
     // Constructor: initializes all fields

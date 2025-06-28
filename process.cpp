@@ -1,4 +1,4 @@
-#include "process.h"
+#include "Process.h"
 
 #pragma once
 #include <iostream>
@@ -6,6 +6,7 @@
 #include <ctime>
 #include <iomanip>
 #include <sstream>
+#include <vector>
 #include <string>
 
 
@@ -18,10 +19,18 @@
         std::cout << "ID: " << id << "\n";
 
         std::cout << "Logs:\n";
-        //call logs here
+        displayLogs();
 
-        std::cout << "Current instruction line: " << /*num here <<*/ "\n";
-        std::cout << "Lines of code: " << totalInstructions << "\n\n";
+        if (hasFinished()) {
+            std::cout << "\nFinished!\n";
+        }
+        else {
+            std::cout << "\nCurrent instruction line: "
+                << (totalInstructions - remainingInstructions) << "\n"
+                << "Lines of code: "
+                << totalInstructions << "\n";
+        }
+        std::cout << std::endl;
     }
 
     // Get a timestamp string in format (MM/DD/YYYY hh:mm:ssAM/PM)
@@ -50,21 +59,24 @@
         return oss.str();
     }
 
+    // Displays all collected log entries
     void Process::displayLogs() const {
-        std::cout << getTimestamp() << "Core: " << /*core <<*/ "0* " << "Hello world from " << name << "!\n";
+        for (const auto& entry : logs) {
+            std::cout << entry << "\n";
+        }
     }
 
-    // Execute one instruction (if any remain)
+    // Executes one instruction, logs it with timestamp
     void Process::executeInstruction() {
-        if (remainingInstructions > 0) {
-            std::cout << "Executing instruction for Process " << id << ": " << name << "\n";
-            displayLogs();
-            --remainingInstructions;   // consume one instruction
-        }
-        else {
-            std::cout << "Process " << id << ": " << name << " has already finished.\n";
-        }
+        if (remainingInstructions <= 0) return;
+
+        --remainingInstructions;
+        std::ostringstream entry;
+        entry << getTimestamp()
+            << " \"Hello world from " << name << "!\"";
+        logs.push_back(entry.str());
     }
+
 
     // How many instructions are left
     int Process::getRemainingInstructions() const {
