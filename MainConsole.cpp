@@ -336,6 +336,8 @@ void MainConsole::attachToProcess(const String& processName) {
 
 void MainConsole::showWelcomeMessage() {
     std::cout << "\033[32mHello, Welcome to CSOPESY commandline!\033[0m" << std::endl;
+    std::cout << "\nDevelopers: \n Ambrosio, Lorenzo Aivin F. \n Larraquel, Reign Elaiza D.\n" << std::endl;
+    std::cout << "Last Updated: 06-28-2025\n" << std::endl;
     std::cout << "Type \033[33m'exit'\033[0m to quit, \033[33m'clear'\033[0m to clear the screen" << std::endl;
     
     if (!isSystemInitialized) {
