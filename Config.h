@@ -11,6 +11,10 @@ namespace Config {
         int minIns;
         int maxIns;
         int delayPerExec;
+        // Memory management parameters
+        int maxOverallMem;
+        int memPerFrame;
+        int memPerProc;
     };
 
     // Configuration management functions
@@ -25,6 +29,11 @@ namespace Config {
     int getMinIns();
     int getMaxIns();
     int getDelayPerExec();
+    
+    // Memory management getters
+    int getMaxOverallMem();
+    int getMemPerFrame();
+    int getMemPerProc();
     
     // System state
     bool isInitialized();

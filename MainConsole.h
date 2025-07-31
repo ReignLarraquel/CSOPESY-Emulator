@@ -42,6 +42,9 @@ private:
     void listProcesses();                              // screen -ls
     void attachToProcess(const String& processName);   // screen -r
     
+    // Memory management
+    void showMemoryStatus();                           // vmstat
+    
     // UI Elements
     void showWelcomeMessage();
     void showLogo();

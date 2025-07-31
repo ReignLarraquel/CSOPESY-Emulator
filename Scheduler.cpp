@@ -126,6 +126,13 @@ void CPUScheduler::onCpuTick() {
     
     // Phase 5: Schedule new processes to available cores
     scheduleWaitingProcesses();
+    
+    // Phase 6: Generate memory snapshot every quantum cycle
+    int quantumCycles = Config::getQuantumCycles();
+    if (cpuTicks.load() % quantumCycles == 0) {
+        int currentQuantum = static_cast<int>(cpuTicks.load() / quantumCycles);
+        memoryManager.generateMemorySnapshot(currentQuantum);
+    }
 }
 
 void CPUScheduler::handleProcessExecution() {
@@ -188,6 +195,14 @@ void CPUScheduler::handleSleepingProcesses() {
 }
 
 void CPUScheduler::handleProcessCompletion() {
+    // Get all finished processes and deallocate their memory
+    auto finishedProcesses = processManager.getProcessesByStatus(ProcessStatus::Finished);
+    
+    for (const String& processName : finishedProcesses) {
+        // Deallocate memory when process finishes
+        memoryManager.deallocateMemory(processName);
+    }
+    
     // Note: Keep finished processes in ProcessManager for reporting purposes
     // They should only be removed from cores/queues, not from memory
     // This allows 'screen -ls' and 'report-util' to show completed processes
@@ -257,13 +272,46 @@ void CPUScheduler::scheduleWaitingProcesses() {
                 continue;
             }
             
+            // CHECK MEMORY AVAILABILITY FIRST
+            if (!memoryManager.hasMemoryFor(processName)) {
+                // No memory available - revert to tail of ready queue
+                if (algorithm == "fcfs") {
+                    fcfsQueue.push(processName); // Add to back of FCFS queue
+                } else if (algorithm == "rr") {
+                    roundRobinQueue.push_back(processName); // Add to back of RR queue
+                }
+                continue; // Skip to next available core
+            }
+            
+            // Try to allocate memory for the process
+            if (!memoryManager.allocateMemory(processName)) {
+                // Memory allocation failed - revert to tail of ready queue
+                if (algorithm == "fcfs") {
+                    fcfsQueue.push(processName);
+                } else if (algorithm == "rr") {
+                    roundRobinQueue.push_back(processName);
+                }
+                continue;
+            }
+            
+            // ATOMIC ASSIGNMENT: Assign core first, then update process state
             if (coreManager.tryAssignProcess(coreId, processName)) {
-                processManager.updateProcessStatus(processName, ProcessStatus::Running);
+                // Set core on process IMMEDIATELY after core assignment succeeds
                 processManager.setProcessCore(processName, coreId);
+                // Then update status to Running
+                processManager.updateProcessStatus(processName, ProcessStatus::Running);
                 
                 // Set quantum for Round Robin
                 if (algorithm == "rr") {
                     coreManager.setQuantum(coreId, Config::getQuantumCycles());
+                }
+            } else {
+                // If core assignment failed, deallocate memory and put process back in queue
+                memoryManager.deallocateMemory(processName);
+                if (algorithm == "fcfs") {
+                    fcfsQueue.push(processName);
+                } else if (algorithm == "rr") {
+                    roundRobinQueue.push_front(processName);
                 }
             }
         }
@@ -293,8 +341,8 @@ void CPUScheduler::processGenerator() {
         auto process = createRandomProcess(processName);
         addProcess(process);
         
-        // Wait for next generation cycle
-        std::this_thread::sleep_for(std::chrono::milliseconds(frequency * 1));
+        // Wait for next generation cycle (250ms multiplier for reasonable rate)
+        std::this_thread::sleep_for(std::chrono::milliseconds(frequency * 250));
     }
 }
 
@@ -358,4 +406,8 @@ std::vector<String> CPUScheduler::getAllProcessNames() const {
 
 bool CPUScheduler::hasProcess(const String& processName) const {
     return processManager.hasProcess(processName);
+}
+
+void CPUScheduler::printMemoryStatus() const {
+    memoryManager.printMemoryStatus();
 } 

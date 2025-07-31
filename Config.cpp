@@ -16,6 +16,10 @@ namespace Config {
         g_config.minIns = 1000;
         g_config.maxIns = 2000;
         g_config.delayPerExec = 0;
+        // Memory management defaults
+        g_config.maxOverallMem = 16384;
+        g_config.memPerFrame = 16;
+        g_config.memPerProc = 4096;
         g_initialized = true;
     }
 
@@ -62,6 +66,15 @@ namespace Config {
                 else if (key == "delay-per-exec") {
                     g_config.delayPerExec = std::stoi(value);
                 }
+                else if (key == "max-overall-mem") {
+                    g_config.maxOverallMem = std::stoi(value);
+                }
+                else if (key == "mem-per-frame") {
+                    g_config.memPerFrame = std::stoi(value);
+                }
+                else if (key == "mem-per-proc") {
+                    g_config.memPerProc = std::stoi(value);
+                }
             }
         }
         
@@ -76,6 +89,9 @@ namespace Config {
         std::cout << "  min-ins: " << g_config.minIns << std::endl;
         std::cout << "  max-ins: " << g_config.maxIns << std::endl;
         std::cout << "  delay-per-exec: " << g_config.delayPerExec << std::endl;
+        std::cout << "  max-overall-mem: " << g_config.maxOverallMem << std::endl;
+        std::cout << "  mem-per-frame: " << g_config.memPerFrame << std::endl;
+        std::cout << "  mem-per-proc: " << g_config.memPerProc << std::endl;
         
         return true;
     }
@@ -88,5 +104,11 @@ namespace Config {
     int getMinIns() { return g_initialized ? g_config.minIns : 1000; }
     int getMaxIns() { return g_initialized ? g_config.maxIns : 2000; }
     int getDelayPerExec() { return g_initialized ? g_config.delayPerExec : 0; }
+    
+    // Memory management getters
+    int getMaxOverallMem() { return g_initialized ? g_config.maxOverallMem : 16384; }
+    int getMemPerFrame() { return g_initialized ? g_config.memPerFrame : 16; }
+    int getMemPerProc() { return g_initialized ? g_config.memPerProc : 4096; }
+    
     bool isInitialized() { return g_initialized; }
 } 

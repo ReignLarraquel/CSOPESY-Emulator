@@ -130,6 +130,7 @@
     <ClCompile Include="CoreManager.cpp" />
     <ClCompile Include="MainConsole.cpp" />
     <ClCompile Include="MarqueeConsole.cpp" />
+    <ClCompile Include="MemoryManager.cpp" />
     <ClCompile Include="ProcessConsole.cpp" />
     <ClCompile Include="ProcessManager.cpp" />
     <ClCompile Include="process.cpp" />
@@ -144,6 +145,7 @@
     <ClInclude Include="CoreManager.h" />
     <ClInclude Include="MainConsole.h" />
     <ClInclude Include="MarqueeConsole.h" />
+    <ClInclude Include="MemoryManager.h" />
     <ClInclude Include="ProcessConsole.h" />
     <ClInclude Include="ProcessManager.h" />
     <ClInclude Include="process.h" />

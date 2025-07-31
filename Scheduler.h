@@ -3,6 +3,7 @@
 #include "process.h"
 #include "ProcessManager.h"
 #include "CoreManager.h"
+#include "MemoryManager.h"
 #include <queue>
 #include <deque>
 #include <vector>
@@ -44,6 +45,9 @@ public:
     std::vector<String> getAllProcessNames() const;
     bool hasProcess(const String& processName) const;
     
+    // Memory management
+    void printMemoryStatus() const;
+    
 private:
     // TICK-DRIVEN ARCHITECTURE - CPU ticks drive everything!
     void cpuTickManager();           // Master tick generator
@@ -59,6 +63,7 @@ private:
     // NEW ARCHITECTURE: Separated concerns
     ProcessManager processManager;          // Owns all process state
     CoreManager coreManager;               // Owns all core assignments
+    MemoryManager memoryManager;           // Owns all memory allocations
     
     // Process queues (depending on algorithm)
     std::queue<String> fcfsQueue;           // FCFS ready queue

@@ -13,7 +13,7 @@
 MainConsole::MainConsole() : AConsole(MAIN_CONSOLE) {
     isSystemInitialized = false;
     nextProcessId = 1;
-    scheduler = std::make_unique<CPUScheduler>();
+    // Don't create scheduler here - wait until config is loaded
 }
 
 void MainConsole::onEnabled() {
@@ -84,6 +84,9 @@ bool MainConsole::handleCommand(const String& command) {
     else if (cmd == "report-util") {
         generateReport();
     }
+    else if (cmd == "vmstat") {
+        showMemoryStatus();
+    }
     else {
         showErrorMessage("Unknown command: " + command);
     }
@@ -117,6 +120,9 @@ void MainConsole::initializeSystem() {
     if (!configLoaded) {
         std::cout << "\033[33mUsing default configuration values.\033[0m" << std::endl;
     }
+    
+    // Create scheduler AFTER config is loaded
+    scheduler = std::make_unique<CPUScheduler>();
     
     isSystemInitialized = true;
     std::cout << "\033[32mSystem initialized successfully!\033[0m" << std::endl;
@@ -154,6 +160,10 @@ void MainConsole::handleScreenCommand(const std::vector<String>& args) {
 }
 
 void MainConsole::startScheduler() {
+    if (!scheduler) {
+        showUninitializedError();
+        return;
+    }
     if (!scheduler->isRunning()) {
         scheduler->start();
         scheduler->startProcessGeneration();
@@ -164,6 +174,10 @@ void MainConsole::startScheduler() {
 }
 
 void MainConsole::stopScheduler() {
+    if (!scheduler) {
+        showUninitializedError();
+        return;
+    }
     if (scheduler->isRunning()) {
         scheduler->stop();
         std::cout << "\033[33mScheduler stopping... (finishing existing processes)\033[0m" << std::endl;
@@ -173,6 +187,11 @@ void MainConsole::stopScheduler() {
 }
 
 void MainConsole::generateReport() {
+    if (!scheduler) {
+        showUninitializedError();
+        return;
+    }
+    
     std::cout << "Generating CPU utilization report..." << std::endl;
     
     std::ofstream reportFile("csopesy-log.txt");
@@ -248,7 +267,21 @@ void MainConsole::generateReport() {
     std::cout << "\033[32mReport generated: csopesy-log.txt\033[0m" << std::endl;
 }
 
+void MainConsole::showMemoryStatus() {
+    if (!scheduler) {
+        showUninitializedError();
+        return;
+    }
+    
+    scheduler->printMemoryStatus();
+}
+
 void MainConsole::createProcess(const String& processName) {
+    if (!scheduler) {
+        showUninitializedError();
+        return;
+    }
+    
     // Check if process already exists
     if (scheduler->hasProcess(processName)) {
         showErrorMessage("Process " + processName + " already exists.");
@@ -272,6 +305,11 @@ void MainConsole::createProcess(const String& processName) {
 }
 
 void MainConsole::listProcesses() {
+    if (!scheduler) {
+        showUninitializedError();
+        return;
+    }
+    
     // Get real CPU utilization from scheduler
     double cpuUtil = scheduler->getCpuUtilization();
     int coresUsed = scheduler->getCoresUsed();
@@ -333,14 +371,19 @@ void MainConsole::listProcesses() {
 }
 
 void MainConsole::attachToProcess(const String& processName) {
+    if (!scheduler) {
+        showUninitializedError();
+        return;
+    }
+    
     // Check if process exists
-    auto process = scheduler->getProcess(processName);
-    if (!process) {
+    if (!scheduler->hasProcess(processName)) {
         showErrorMessage("Process " + processName + " not found.");
         return;
     }
     
     // Check if process is finished
+    auto process = scheduler->getProcess(processName);
     if (process->getStatus() == ProcessStatus::Finished) {
         showErrorMessage("Process " + processName + " not found.");
         return;

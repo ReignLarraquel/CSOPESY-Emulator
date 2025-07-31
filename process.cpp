@@ -15,7 +15,19 @@
           remainingInstructions(numInstructions), status(ProcessStatus::Waiting), 
           assignedCore(-1), currentInstructionIndex(0), sleepCyclesRemaining(0) {
         creationTime = getTimestamp();
-        generateRandomInstructions(numInstructions);
+        // Reserve space for potential FOR_END instructions within the requested instruction count
+        int maxForLoops = 3; // Maximum nesting level
+        int reservedForEndInstructions = maxForLoops;
+        int actualInstructionsToGenerate = numInstructions - reservedForEndInstructions;
+        generateRandomInstructions(actualInstructionsToGenerate);
+        
+        // If we didn't use all reserved FOR_END slots, fill remaining with PRINT instructions
+        int unusedSlots = numInstructions - static_cast<int>(instructions.size());
+        for (int i = 0; i < unusedSlots; i++) {
+            Instruction instr(InstructionType::PRINT);
+            instr.arg1 = "Hello world from " + name + "!";
+            instructions.push_back(instr);
+        }
     }
 
     void Process::printProcess() const {
@@ -144,16 +156,17 @@
         std::uniform_int_distribution<> sleepDist(1, 10);
         
         instructions.clear();
-        instructions.reserve(numInstructions);
+        instructions.reserve(totalInstructions); // Reserve full space including potential FOR_ENDs
         
         int forNestingLevel = 0;
         std::vector<int> forStartPositions;
         
-        for (int i = 0; i < numInstructions; i++) {
+        for (int i = 0; i < numInstructions && instructions.size() < totalInstructions; i++) {
             InstructionType instrType = static_cast<InstructionType>(instrTypeDist(gen));
             
-            // Limit FOR loop nesting to 3 levels
-            if (instrType == InstructionType::FOR_START && forNestingLevel >= 3) {
+            // Limit FOR loop nesting to 3 levels and prevent new FOR loops if close to instruction limit
+            if (instrType == InstructionType::FOR_START && 
+                (forNestingLevel >= 3 || instructions.size() >= totalInstructions - forStartPositions.size())) {
                 instrType = InstructionType::PRINT; // Default to PRINT instead
             }
             
@@ -216,14 +229,20 @@
             instructions.push_back(instr);
         }
         
-        // Close any unclosed FOR loops
-        while (!forStartPositions.empty()) {
+        // Close any unclosed FOR loops, but only if we have space
+        while (!forStartPositions.empty() && instructions.size() < totalInstructions) {
             Instruction endInstr(InstructionType::FOR_END);
             endInstr.forLevel = --forNestingLevel;
             instructions.push_back(endInstr);
             forStartPositions.pop_back();
-            totalInstructions++;
-            remainingInstructions++;
+            // Don't increment totalInstructions or remainingInstructions anymore
+        }
+        
+        // Fill any remaining slots with PRINT instructions
+        while (instructions.size() < totalInstructions) {
+            Instruction instr(InstructionType::PRINT);
+            instr.arg1 = "Hello world from " + name + "!";
+            instructions.push_back(instr);
         }
     }
 
@@ -338,7 +357,7 @@
         static std::vector<std::string> varNames = {"x", "y", "z", "a", "b", "c", "counter", "temp", "result", "sum"};
         static std::random_device rd;
         static std::mt19937 gen(rd());
-        std::uniform_int_distribution<> dist(0, varNames.size() - 1);
+        std::uniform_int_distribution<> dist(0, static_cast<int>(varNames.size()) - 1);
         
         return varNames[dist(gen)];
     }
