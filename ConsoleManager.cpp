@@ -17,13 +17,13 @@ ConsoleManager::ConsoleManager()
     // Create each concrete console
     auto mainConsole = std::make_shared<MainConsole>();
     auto marqueeConsole = std::make_shared<MarqueeConsole>();
-    auto processConsole = std::make_shared<ProcessConsole>();  // General process console
+   // auto processConsole = std::make_shared<ProcessConsole>();  // General process console
     //auto memoryConsole = std::make_shared<MemorySimulationConsole>();
 
     // Register them by name
     consoleTable[MAIN_CONSOLE] = mainConsole;
     consoleTable[MARQUEE_CONSOLE] = marqueeConsole;
-    consoleTable[PROCESS_CONSOLE] = processConsole;
+   // consoleTable[PROCESS_CONSOLE] = processConsole;
     //consoleTable[MEMORY_CONSOLE] = memoryConsole;
 
     // Activate the main screen initially
@@ -107,4 +107,8 @@ void ConsoleManager::unregisterConsole(const String& consoleName) {
     if (it != consoleTable.end()) {
         consoleTable.erase(it);
     }
+}
+
+bool ConsoleManager::hasConsole(const String& consoleName) const {
+    return consoleTable.find(consoleName) != consoleTable.end();
 }

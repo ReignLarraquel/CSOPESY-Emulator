@@ -8,7 +8,7 @@
 
 const String MAIN_CONSOLE = "MAIN_CONSOLE";
 const String MARQUEE_CONSOLE = "MARQUEE_CONSOLE";
-const String PROCESS_CONSOLE = "PROCESS_CONSOLE";
+//const String PROCESS_CONSOLE = "PROCESS_CONSOLE";
 //const String MEMORY_CONSOLE = "MEMORY_CONSOLE";
 
 class ConsoleManager
@@ -26,6 +26,8 @@ public:
     void returnToPreviousConsole();
     void exitApplication();
     bool isRunning()   const;
+    bool hasConsole(const String& consoleName) const;
+
     
     // Dynamic console registration
     void registerConsole(const String& consoleName, std::shared_ptr<AConsole> console);

@@ -4,20 +4,19 @@
 #include <sstream>
 #include <algorithm>
 
-ProcessConsole::ProcessConsole(std::shared_ptr<Process> process) 
-    : AConsole(process ? ("PROCESS_" + process->getName()) : "PROCESS_CONSOLE"), 
-      attachedProcess(process) {
+ProcessConsole::ProcessConsole(CPUScheduler& scheduler, std::shared_ptr<Process> process)
+    : AConsole(process ? ("PROCESS_" + process->getName()) : "PROCESS_CONSOLE"),
+    scheduler(scheduler), attachedProcess(process) {
 }
 
 void ProcessConsole::onEnabled() {
     display();
-    
-    // Run interactive loop
+
     String input;
     while (true) {
         std::cout << "root:\\> ";
         std::getline(std::cin, input);
-        
+
         if (!input.empty()) {
             bool shouldExit = handleCommand(input);
             if (shouldExit) {
@@ -30,17 +29,17 @@ void ProcessConsole::onEnabled() {
 
 void ProcessConsole::display() {
     system("cls");
-    // Don't show header immediately, will be shown when commands are executed
+    // Don’t show header immediately
 }
 
 void ProcessConsole::process() {
-    // This method is now handled by the interactive loop in onEnabled()
+    // Interactive handled in onEnabled()
 }
 
 bool ProcessConsole::handleCommand(const String& command) {
     String cmd = command;
     std::transform(cmd.begin(), cmd.end(), cmd.begin(), ::tolower);
-    
+
     if (cmd == "exit") {
         return true;
     }
@@ -49,7 +48,6 @@ bool ProcessConsole::handleCommand(const String& command) {
         return false;
     }
     else {
-        // For any other command, just show a new prompt without error
         return false;
     }
 }
@@ -58,32 +56,31 @@ void ProcessConsole::showProcessInfo() {
     std::cout << "\n";
     if (attachedProcess) {
         attachedProcess->printProcess();
-        
-        // Check if process is finished and show "Finished!" message
+
         if (attachedProcess->getStatus() == ProcessStatus::Finished) {
             std::cout << "\nFinished!\n";
         }
-    } else {
-        std::cout << "No process attached." << std::endl;
+    }
+    else {
+        std::cout << "No process attached.\n";
     }
     std::cout << "\n";
 }
 
 void ProcessConsole::exitToMain() {
-    // This method is kept for potential future use
-    // Currently exit is handled directly in the interactive loop
-    std::cout << "Returning to main console..." << std::endl;
+    std::cout << "Returning to main console...\n";
 }
 
 void ProcessConsole::showProcessHeader() {
     if (attachedProcess) {
-        std::cout << "=== Process Screen: " << attachedProcess->getName() << " ===" << std::endl;
-    } else {
-        std::cout << "=== PROCESS MANAGEMENT CONSOLE ===" << std::endl;
+        std::cout << "=== Process Screen: " << attachedProcess->getName() << " ===\n";
+    }
+    else {
+        std::cout << "=== PROCESS MANAGEMENT CONSOLE ===\n";
     }
 }
 
 void ProcessConsole::showErrorMessage(const String& error) {
-    std::cout << "\033[31m" << error << "\033[0m" << std::endl;
+    std::cout << "\033[31m" << error << "\033[0m\n";
     std::cout << "> ";
-} 
+}

@@ -139,25 +139,66 @@ void MainConsole::clearConsole() {
 
 void MainConsole::handleScreenCommand(const std::vector<String>& args) {
     if (args.size() < 2) {
-        showErrorMessage("Usage: screen -s <name> | screen -ls | screen -r <name>");
+        showErrorMessage("Missing screen target. Usage: screen [-s|-r|-ls] <name>");
         return;
     }
-    
-    String flag = args[1];
-    
-    if (flag == "-ls") {
+
+    if (args[1] == "-ls") {
         listProcesses();
     }
-    else if (flag == "-s" && args.size() >= 3) {
-        createProcess(args[2]);
+    else if (args[1] == "-s") {
+        if (args.size() < 3) {
+            showErrorMessage("Missing process name. Usage: screen -s <process>");
+            return;
+        }
+
+        String processName = args[2];
+        // Create the process if it doesn’t exist
+        if (!scheduler->hasProcess(processName)) {
+            createProcess(processName);  // <-- your existing method that handles creation
+        }
+
+        auto process = scheduler->getProcess(processName);
+        String consoleName = "PROCESS_" + processName;
+
+        // Only create and register if not already registered
+        if (!ConsoleManager::getInstance()->hasConsole(consoleName)) {
+            auto console = std::make_shared<ProcessConsole>(*scheduler, process);
+            ConsoleManager::getInstance()->registerConsole(consoleName, console);
+        }
+
+        ConsoleManager::getInstance()->switchConsole(consoleName);
+
     }
-    else if (flag == "-r" && args.size() >= 3) {
-        attachToProcess(args[2]);
-    }
-    else {
-        showErrorMessage("Invalid screen command");
+    else if (args[1] == "-r") {
+        if (args.size() < 3) {
+            showErrorMessage("Missing process name. Usage: screen -r <process>");
+            return;
+        }
+
+        String processName = args[2];
+        String consoleName = "PROCESS_" + processName;
+
+        // If already registered, just switch
+        if (ConsoleManager::getInstance()->hasConsole(consoleName)) {
+            ConsoleManager::getInstance()->switchConsole(consoleName);
+            return;
+        }
+
+        // If not registered, but the process exists, create and register it now
+        if (scheduler->hasProcess(processName)) {
+            auto process = scheduler->getProcess(processName);
+            auto console = std::make_shared<ProcessConsole>(*scheduler, process);
+            ConsoleManager::getInstance()->registerConsole(consoleName, console);
+            ConsoleManager::getInstance()->switchConsole(consoleName);
+        }
+        else {
+            showErrorMessage("No existing process or screen for: " + processName);
+        }
     }
 }
+
+
 
 void MainConsole::startScheduler() {
     if (!scheduler) {
@@ -375,28 +416,24 @@ void MainConsole::attachToProcess(const String& processName) {
         showUninitializedError();
         return;
     }
-    
-    // Check if process exists
+
     if (!scheduler->hasProcess(processName)) {
         showErrorMessage("Process " + processName + " not found.");
         return;
     }
-    
-    // Check if process is finished
+
     auto process = scheduler->getProcess(processName);
     if (process->getStatus() == ProcessStatus::Finished) {
-        showErrorMessage("Process " + processName + " not found.");
+        showErrorMessage("Process " + processName + " already finished.");
         return;
     }
-    
-    // Create and register ProcessConsole for this process
+
     String consoleName = "PROCESS_" + processName;
-    auto processConsole = std::make_shared<ProcessConsole>(process);
-    
-    // Register the console dynamically and switch to it
+    auto processConsole = std::make_shared<ProcessConsole>(*scheduler, process);
     ConsoleManager::getInstance()->registerConsole(consoleName, processConsole);
     ConsoleManager::getInstance()->switchConsole(consoleName);
 }
+
 
 void MainConsole::showWelcomeMessage() {
     std::cout << "\033[32mHello, Welcome to CSOPESY commandline!\033[0m" << std::endl;
