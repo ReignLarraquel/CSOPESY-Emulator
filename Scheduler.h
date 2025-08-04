@@ -35,6 +35,17 @@ public:
     double getCpuUtilization() const;
     int getCoresUsed() const;
     int getCoresAvailable() const;
+    CoreManager& getCoreManager() {
+        return coreManager;
+    }
+
+    const CoreManager& getCoreManager() const {
+        return coreManager;
+    }
+
+    MemoryManager& getMemoryManager() {
+        return memoryManager;
+    }
     
     // Core management
     std::vector<int> getActiveCores() const;
@@ -47,6 +58,11 @@ public:
     
     // Memory management
     void printMemoryStatus() const;
+    void dumpBackingStoreToFile(const std::string& filename = "csopesy-backing-store.txt") const;
+
+    int getNextProcessId();
+    
+    void executeProcessDirectly(const String& processName);
     
 private:
     // TICK-DRIVEN ARCHITECTURE - CPU ticks drive everything!
@@ -91,4 +107,4 @@ private:
     void handleProcessCompletion();   // Remove finished processes
     void handleQuantumExpiration();   // Preempt processes whose quantum expired
     void scheduleWaitingProcesses();  // Assign waiting processes to available cores
-}; 
+};

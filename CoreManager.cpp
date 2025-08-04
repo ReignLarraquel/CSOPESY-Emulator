@@ -174,11 +174,20 @@ std::vector<CoreManager::CoreInfo> CoreManager::getActiveProcessesWithQuantum() 
 
 void CoreManager::updateQuantums() {
     std::lock_guard<std::mutex> lock(coreMutex);
-    
+
     for (int i = 0; i < numCores; i++) {
-        if (!coreAssignments[i].empty() && quantumRemaining[i] > 0) {
-            quantumRemaining[i]--;
+        if (!coreAssignments[i].empty()) {
+            // Active core
+            activeTicks++;
+            if (quantumRemaining[i] > 0) {
+                quantumRemaining[i]--;
+            }
         }
+        else {
+            // Idle core
+            idleTicks++;
+        }
+        totalTicks++;
     }
 }
 

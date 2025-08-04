@@ -95,6 +95,11 @@ std::vector<String> ProcessManager::getAllProcessNames() const {
     return result;
 }
 
+std::map<String, std::shared_ptr<Process>> ProcessManager::getAllProcesses() const {
+    std::lock_guard<std::mutex> lock(processMutex);
+    return processMap;
+}
+
 std::vector<ProcessManager::ProcessInfo> ProcessManager::executeInstructionsForProcesses(const std::vector<String>& processNames) {
     std::lock_guard<std::mutex> lock(processMutex);
     std::vector<ProcessInfo> results;

@@ -1,5 +1,6 @@
 #include "process.h"
 #include "Config.h"
+#include "MemoryManager.h"
 #include <chrono>
 #include <ctime>
 #include <iomanip>
@@ -10,24 +11,55 @@
 
 
     // Constructor: initializes all fields and generates random instructions
-    Process::Process(const std::string& processName, int processId, int numInstructions)
-        : name(processName), id(processId), totalInstructions(numInstructions), 
-          remainingInstructions(numInstructions), status(ProcessStatus::Waiting), 
-          assignedCore(-1), currentInstructionIndex(0), sleepCyclesRemaining(0) {
-        creationTime = getTimestamp();
-        // Reserve space for potential FOR_END instructions within the requested instruction count
-        int maxForLoops = 3; // Maximum nesting level
+Process::Process(const std::string& name, int id, int numInstructions, int memorySize,
+    const std::string& customInstructions)
+    : name(name), id(id), totalInstructions(numInstructions),
+    remainingInstructions(numInstructions), status(ProcessStatus::Waiting),
+    assignedCore(-1), currentInstructionIndex(0), sleepCyclesRemaining(0),
+    memoryRequirement(memorySize) {
+
+    creationTime = getTimestamp();
+
+    // Initialize page table
+    int numPages = memoryRequirement / Config::getMemPerFrame();
+    for (int i = 0; i < numPages; ++i) {
+        pageTable[i] = { -1, false, false };
+    }
+
+    if (!customInstructions.empty()) {
+        try {
+            // Parse and set custom instructions
+            setCustomInstructions(customInstructions);
+        }
+        catch (const std::exception& e) {
+            std::ostringstream entry;
+            entry << getTimestamp() << " Core:" << assignedCore
+                << " ERROR: Invalid instructions: " << e.what();
+            logs.push_back(entry.str());
+
+            // Fall back to random instructions if custom instructions failed
+            generateRandomInstructions(numInstructions);
+        }
+    }
+    else {
+        // Generate random instructions as usual
+        int maxForLoops = 3;
         int reservedForEndInstructions = maxForLoops;
         int actualInstructionsToGenerate = numInstructions - reservedForEndInstructions;
         generateRandomInstructions(actualInstructionsToGenerate);
-        
-        // If we didn't use all reserved FOR_END slots, fill remaining with PRINT instructions
-        int unusedSlots = numInstructions - static_cast<int>(instructions.size());
-        for (int i = 0; i < unusedSlots; i++) {
-            Instruction instr(InstructionType::PRINT);
-            instr.arg1 = "Hello world from " + name + "!";
-            instructions.push_back(instr);
-        }
+    }
+
+    // Fill any remaining slots with PRINT instructions if needed
+    int unusedSlots = numInstructions - static_cast<int>(instructions.size());
+    for (int i = 0; i < unusedSlots; i++) {
+        Instruction instr(InstructionType::PRINT);
+        instr.arg1 = "Hello world from " + name + "!";
+        instructions.push_back(instr);
+    }
+}
+
+    int Process::getMemoryRequirement() const {
+        return memoryRequirement;
     }
 
     void Process::printProcess() const {
@@ -88,69 +120,71 @@
             return;
         }
 
-        // Apply delay-per-exec as busy-waiting (process stays on CPU)
+        // Apply CPU delay if configured
         int delay = Config::getDelayPerExec();
         if (delay > 0) {
-            // Busy-wait for specified number of CPU cycles
             auto start = std::chrono::steady_clock::now();
-            auto target = start + std::chrono::milliseconds(delay * 1); // delay * tick_duration
+            auto target = start + std::chrono::milliseconds(delay);
             while (std::chrono::steady_clock::now() < target) {
-                // Busy wait - process remains on CPU
+                // Busy wait
             }
         }
 
-        // Handle SLEEP cycles - this should only be called when process is Running
-        // If process is Sleeping, it shouldn't be scheduled until sleep ends
+        // Handle sleep logic
         if (sleepCyclesRemaining > 0) {
             sleepCyclesRemaining--;
             if (sleepCyclesRemaining == 0) {
-                // Sleep finished, return to Waiting status
                 status = ProcessStatus::Waiting;
             }
-            return; // Don't execute any instruction during sleep
+            return;
         }
 
-        // Execute current instruction
+        // === DEMAND PAGING LOGIC ===
+        int frameSize = Config::getMemPerFrame();
+        int instructionSize = sizeof(Instruction);  // Typically 16-32 bytes depending on struct
+        int virtualPage = (currentInstructionIndex * instructionSize) / frameSize;
+
+        // Check if page is present; if not, allocate it
+        auto& pt = this->getPageTableRef();
+        if (pt.find(virtualPage) == pt.end() || !pt[virtualPage].valid) {
+            if (memoryManager) {
+                memoryManager->allocatePage(this, virtualPage);
+            }
+        }
+
+        // Mark this page as recently accessed (for clock replacement)
+        if (memoryManager && pt.find(virtualPage) != pt.end() && pt[virtualPage].valid) {
+            int frameNumber = pt[virtualPage].frameNumber;
+            memoryManager->markPageAccessed(frameNumber);  // Implement this in MemoryManager
+        }
+
+        // === EXECUTE INSTRUCTION ===
         const Instruction& currentInstr = instructions[currentInstructionIndex];
-        
         switch (currentInstr.type) {
-            case InstructionType::PRINT:
-                executePrintInstruction(currentInstr);
-                break;
-            case InstructionType::DECLARE:
-                executeDeclareInstruction(currentInstr);
-                break;
-            case InstructionType::ADD:
-                executeAddInstruction(currentInstr);
-                break;
-            case InstructionType::SUBTRACT:
-                executeSubtractInstruction(currentInstr);
-                break;
-            case InstructionType::SLEEP:
-                executeSleepInstruction(currentInstr);
-                break;
-            case InstructionType::FOR_START:
-                executeForStartInstruction(currentInstr);
-                break;
-            case InstructionType::FOR_END:
-                executeForEndInstruction(currentInstr);
-                break;
+        case InstructionType::PRINT:     executePrintInstruction(currentInstr); break;
+        case InstructionType::DECLARE:   executeDeclareInstruction(currentInstr); break;
+        case InstructionType::ADD:       executeAddInstruction(currentInstr); break;
+        case InstructionType::SUBTRACT:  executeSubtractInstruction(currentInstr); break;
+        case InstructionType::SLEEP:     executeSleepInstruction(currentInstr); break;
+        case InstructionType::FOR_START: executeForStartInstruction(currentInstr); break;
+        case InstructionType::FOR_END:   executeForEndInstruction(currentInstr); break;
+        case InstructionType::READ:      executeReadInstruction(currentInstr); break;
+        case InstructionType::WRITE:     executeWriteInstruction(currentInstr); break;
         }
 
-        // Move to next instruction and update counters
         currentInstructionIndex++;
-        --remainingInstructions;
-        
-        // Auto-update status when finished
+        remainingInstructions--;
+
         if (remainingInstructions == 0 || currentInstructionIndex >= instructions.size()) {
             status = ProcessStatus::Finished;
         }
     }
 
+
     void Process::generateRandomInstructions(int numInstructions) {
         std::random_device rd;
         std::mt19937 gen(rd());
-        std::uniform_int_distribution<> instrTypeDist(0, 6); // 7 instruction types
+        std::uniform_int_distribution<> instrTypeDist(0, 8); // Now 9 instruction types
         std::uniform_int_distribution<> valueDist(1, 100);
         std::uniform_int_distribution<> forRepeatsDist(2, 5);
         std::uniform_int_distribution<> sleepDist(1, 10);
@@ -222,6 +256,20 @@
                         instr.type = InstructionType::PRINT;
                         instr.arg1 = "Hello world from " + name + "!";
                     }
+                    break;
+                }
+                case InstructionType::READ: {
+                    instr.arg1 = generateRandomVariableName(); // Variable to store result
+                    std::ostringstream addressStream;
+                    addressStream << "0x" << std::hex << (gen() % (memoryRequirement * Config::getMemPerFrame())); 
+                    instr.arg2 = addressStream.str();
+                    break;
+                }
+                case InstructionType::WRITE: {
+                    std::ostringstream addressStream;
+                    addressStream << "0x" << std::hex << (gen() % (memoryRequirement * Config::getMemPerFrame())); 
+                    instr.arg1 = addressStream.str();
+                    instr.value = valueDist(gen); // Random value to write
                     break;
                 }
             }
@@ -349,8 +397,18 @@
     }
 
     void Process::setVariableValue(const std::string& varName, uint16_t value) {
-        // Clamp to uint16 range (0 to 65535)
-        variables[varName] = std::min(value, static_cast<uint16_t>(65535));
+        // Check if we've reached the 32-variable limit (64 bytes / 2 bytes per variable = 32)
+        if (variables.size() < 32 || variables.find(varName) != variables.end()) {
+            // Either we haven't hit the limit, or the variable already exists
+            variables[varName] = std::min(value, static_cast<uint16_t>(65535));
+        }
+        else {
+            // Log that we can't create more variables
+            std::ostringstream entry;
+            entry << getTimestamp() << " Core:" << assignedCore
+                << " WARNING: Cannot create variable '" << varName << "' - variable limit reached (32)";
+            logs.push_back(entry.str());
+        }
     }
 
     std::string Process::generateRandomVariableName() {
@@ -385,6 +443,10 @@
         }
     }
 
+    const std::unordered_map<int, PageTableEntry>& Process::getPageTable() const {
+        return pageTable;
+    }
+
     int Process::getAssignedCore() const {
         return assignedCore;
     }
@@ -407,4 +469,305 @@
 
     const std::string& Process::getCreationTime() const {
         return creationTime;
+    }
+
+    bool Process::isValidMemoryAccess(uint32_t address) const {
+        // Validate memory address is within process's allocated memory range
+        return address < (memoryRequirement * Config::getMemPerFrame());
+    }
+
+    uint16_t Process::readMemoryValue(uint32_t address) {
+        // Calculate which page this address falls in
+        int pageSize = Config::getMemPerFrame();
+        int pageNumber = address / pageSize;
+
+        // Check if we need to page in this memory
+        auto& pt = this->getPageTableRef();
+        if (pt.find(pageNumber) == pt.end() || !pt[pageNumber].valid) {
+            if (memoryManager) {
+                memoryManager->allocatePage(this, pageNumber);
+            }
+        }
+
+        // Return the value (0 if not initialized)
+        auto it = memoryValues.find(address);
+        if (it != memoryValues.end()) {
+            return it->second;
+        }
+        return 0; // Return 0 for uninitialized memory
+    }
+
+    void Process::writeMemoryValue(uint32_t address, uint16_t value) {
+        // Calculate which page this address falls in
+        int pageSize = Config::getMemPerFrame();
+        int pageNumber = address / pageSize;
+
+        // Check if we need to page in this memory
+        auto& pt = this->getPageTableRef();
+        if (pt.find(pageNumber) == pt.end() || !pt[pageNumber].valid) {
+            if (memoryManager) {
+                memoryManager->allocatePage(this, pageNumber);
+            }
+        }
+
+        // Write to memory map and mark page as dirty
+        memoryValues[address] = value;
+        if (pt.find(pageNumber) != pt.end() && pt[pageNumber].valid) {
+            pt[pageNumber].dirty = true;
+        }
+    }
+
+    void Process::executeReadInstruction(const Instruction& instr) {
+        // Convert hex address to integer
+        uint32_t address = 0;
+        try {
+            address = std::stoul(instr.arg2, nullptr, 16); // Parse as hex
+        }
+        catch (...) {
+            // Invalid address format
+            std::ostringstream entry;
+            entry << getTimestamp() << " Core:" << assignedCore
+                << " ERROR: Invalid memory address format: " << instr.arg2;
+            logs.push_back(entry.str());
+            status = ProcessStatus::Finished; // Terminate process on error
+            
+            // Set violation flags
+            terminatedDueToMemoryViolation = true;
+            memoryViolationTimestamp = getTimestamp();
+            memoryViolationAddress = 0; // Use 0 for invalid format
+            return;
+        }
+
+        // Check if address is within valid range
+        if (!isValidMemoryAccess(address)) {
+            std::ostringstream entry;
+            entry << getTimestamp() << " Core:" << assignedCore
+                << " ERROR: Memory access violation at address " << instr.arg2;
+            logs.push_back(entry.str());
+            status = ProcessStatus::Finished; // Terminate on access violation
+            
+            // Set violation flags
+            terminatedDueToMemoryViolation = true;
+            memoryViolationTimestamp = getTimestamp();
+            memoryViolationAddress = address;
+            return;
+        }
+
+        // Read value from memory
+        uint16_t value = readMemoryValue(address);
+
+        // Store value in variable
+        setVariableValue(instr.arg1, value);
+
+        // Log the operation
+        std::ostringstream entry;
+        entry << getTimestamp() << " Core:" << assignedCore
+            << " READ " << instr.arg1 << " = " << value << " from " << instr.arg2;
+        logs.push_back(entry.str());
+    }
+
+    void Process::executeWriteInstruction(const Instruction& instr) {
+        // Convert hex address to integer
+        uint32_t address = 0;
+        try {
+            address = std::stoul(instr.arg1, nullptr, 16); // Parse as hex
+        }
+        catch (...) {
+            // Invalid address format
+            std::ostringstream entry;
+            entry << getTimestamp() << " Core:" << assignedCore
+                << " ERROR: Invalid memory address format: " << instr.arg1;
+            logs.push_back(entry.str());
+            status = ProcessStatus::Finished; // Terminate process on error
+            
+            // Set violation flags
+            terminatedDueToMemoryViolation = true;
+            memoryViolationTimestamp = getTimestamp();
+            memoryViolationAddress = 0; // Use 0 for invalid format
+            return;
+        }
+
+        // Check if address is within valid range
+        if (!isValidMemoryAccess(address)) {
+            std::ostringstream entry;
+            entry << getTimestamp() << " Core:" << assignedCore
+                << " ERROR: Memory access violation at address " << instr.arg1;
+            logs.push_back(entry.str());
+            status = ProcessStatus::Finished; // Terminate on access violation
+            
+            // Set violation flags
+            terminatedDueToMemoryViolation = true;
+            memoryViolationTimestamp = getTimestamp();
+            memoryViolationAddress = address;
+            return;
+        }
+
+        // Determine the value to write - either direct value or from variable
+        uint16_t valueToWrite = instr.value;
+        if (!instr.arg2.empty()) {
+            // It's a variable reference - get its value
+            valueToWrite = getVariableValue(instr.arg2);
+        }
+
+        // Write value to memory
+        writeMemoryValue(address, valueToWrite);
+
+        // Log the operation
+        std::ostringstream entry;
+        entry << getTimestamp() << " Core:" << assignedCore
+            << " WRITE " << valueToWrite << " to " << instr.arg1;
+        logs.push_back(entry.str());
+    }
+
+    uint16_t Process::getMemoryValueAt(uint32_t address) const {
+        if (!isValidMemoryAccess(address))
+            return 0;
+        
+        // Since this is const, we can't modify the memoryValues map
+        // to auto-create entries for uninitialized addresses
+        auto it = memoryValues.find(address);
+        if (it != memoryValues.end()) {
+            return it->second;
+        }
+        return 0; // Return 0 for uninitialized memory
+    }
+
+    bool Process::setMemoryValueAt(uint32_t address, uint16_t value) {
+        if (!isValidMemoryAccess(address))
+            return false;
+        
+        // Calculate which page this address falls in
+        int pageSize = Config::getMemPerFrame();
+        int pageNumber = address / pageSize;
+
+        // Check if we need to page in this memory
+        auto& pt = this->getPageTableRef();
+        if (pt.find(pageNumber) == pt.end() || !pt[pageNumber].valid) {
+            if (memoryManager) {
+                memoryManager->allocatePage(this, pageNumber);
+            }
+        }
+
+        // Write to memory map and mark page as dirty
+        memoryValues[address] = value;
+        if (pt.find(pageNumber) != pt.end() && pt[pageNumber].valid) {
+            pt[pageNumber].dirty = true;
+        }
+        return true;
+    }
+
+    std::unordered_map<uint32_t, uint16_t> Process::getMemoryDump() const {
+        return memoryValues;
+    }
+
+    void Process::setCustomInstructions(const std::string& instructionsStr) {
+        instructions.clear();
+        std::vector<std::string> instructionList;
+        
+        // Split by semicolons
+        size_t pos = 0;
+        std::string input = instructionsStr;
+        while ((pos = input.find(';')) != std::string::npos) {
+            std::string instr = input.substr(0, pos);
+            instructionList.push_back(instr);
+            input.erase(0, pos + 1);
+        }
+        if (!input.empty()) {
+            instructionList.push_back(input);
+        }
+        
+        // Validate instruction count
+        if (instructionList.empty() || instructionList.size() > 50) {
+            throw std::runtime_error("Invalid instruction count: must be between 1 and 50");
+        }
+        
+        // Parse each instruction
+        for (const auto& instrText : instructionList) {
+            std::string trimmed = instrText;
+            trimmed.erase(0, trimmed.find_first_not_of(" \t\r\n"));
+            trimmed.erase(trimmed.find_last_not_of(" \t\r\n") + 1);
+            
+            std::stringstream ss(trimmed);
+            std::string cmd;
+            ss >> cmd;
+            
+            if (cmd == "DECLARE") {
+                std::string varName;
+                uint16_t value;
+                ss >> varName >> value;
+                
+                Instruction instr(InstructionType::DECLARE);
+                instr.arg1 = varName;
+                instr.value = value;
+                instructions.push_back(instr);
+            } 
+            else if (cmd == "ADD") {
+                std::string result, op1, op2;
+                ss >> result >> op1 >> op2;
+                
+                Instruction instr(InstructionType::ADD);
+                instr.arg1 = result;
+                instr.arg2 = op1;
+                instr.arg3 = op2;
+                instructions.push_back(instr);
+            } 
+            else if (cmd == "SUBTRACT") {
+                std::string result, op1, op2;
+                ss >> result >> op1 >> op2;
+                
+                Instruction instr(InstructionType::SUBTRACT);
+                instr.arg1 = result;
+                instr.arg2 = op1;
+                instr.arg3 = op2;
+                instructions.push_back(instr);
+            }
+            else if (cmd == "WRITE") {
+                std::string address, value;
+                ss >> address >> value;
+                
+                Instruction instr(InstructionType::WRITE);
+                instr.arg1 = address;
+                
+                // Check if value is a variable or literal
+                if (!value.empty() && std::isdigit(value[0])) {
+                    instr.value = static_cast<uint16_t>(std::stoi(value));
+                } else {
+                    instr.arg2 = value; // It's a variable name
+                }
+                instructions.push_back(instr);
+            }
+            else if (cmd == "READ") {
+                std::string varName, address;
+                ss >> varName >> address;
+                
+                Instruction instr(InstructionType::READ);
+                instr.arg1 = varName;
+                instr.arg2 = address;
+                instructions.push_back(instr);
+            }
+            else if (trimmed.find("PRINT") == 0) {
+                // Handle PRINT with string literals and expressions
+                size_t openParen = trimmed.find("(");
+                size_t closeParen = trimmed.find_last_of(")");
+                
+                if (openParen != std::string::npos && closeParen != std::string::npos) {
+                    std::string content = trimmed.substr(openParen + 1, closeParen - openParen - 1);
+                    
+                    Instruction instr(InstructionType::PRINT);
+                    instr.arg1 = content;
+                    instructions.push_back(instr);
+                }
+            }
+            else if (cmd == "SLEEP") {
+                uint16_t cycles;
+                ss >> cycles;
+                
+                Instruction instr(InstructionType::SLEEP);
+                instr.value = cycles;
+                instructions.push_back(instr);
+            }
+        }
+        
+        remainingInstructions = instructions.size();
+        totalInstructions = instructions.size();
     }

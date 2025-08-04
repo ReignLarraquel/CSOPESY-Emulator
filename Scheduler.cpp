@@ -1,9 +1,10 @@
-#include "Scheduler.h"
+﻿#include "Scheduler.h"
 #include "Config.h"
 #include <random>
 #include <sstream>
 #include <iomanip>
 #include <iostream>
+#include "MainConsole.h"
 
 CPUScheduler::CPUScheduler() 
     : processManager(),
@@ -38,6 +39,7 @@ void CPUScheduler::start() {
     
     std::cout << "Starting " << algorithm << " scheduler with " 
               << coreManager.getCoreCount() << " cores..." << std::endl;
+    startProcessGeneration();
     
     // Start the master CPU tick thread
     tickThread = std::thread(&CPUScheduler::cpuTickManager, this);
@@ -62,24 +64,36 @@ void CPUScheduler::stop() {
 
 void CPUScheduler::addProcess(std::shared_ptr<Process> process) {
     if (!process) return;
-    
+
     String name = process->getName();
-    
+
     // Add to process manager
     processManager.addProcess(process);
-    
+
+    // Set the memory manager reference in the process
+    process->setMemoryManager(&memoryManager);
+
+    // Convert to unordered_map and update MemoryManager
+    std::unordered_map<String, std::shared_ptr<Process>> map;
+    for (const auto& pname : processManager.getAllProcessNames()) {
+        auto p = processManager.getProcess(pname);
+        if (p) map[pname] = p;
+    }
+    memoryManager.setProcessMap(map);
+
     // Add to appropriate queue
     {
         std::lock_guard<std::mutex> queueLock(queueMutex);
         String algorithm = Config::getScheduler();
-        
+
         if (algorithm == "fcfs") {
             fcfsQueue.push(name);
-        } else if (algorithm == "rr") {
+        }
+        else if (algorithm == "rr") {
             roundRobinQueue.push_back(name);
         }
     }
-    
+
     process->setStatus(ProcessStatus::Waiting);
 }
 
@@ -138,14 +152,13 @@ void CPUScheduler::onCpuTick() {
 void CPUScheduler::handleProcessExecution() {
     // Get all currently running processes
     auto runningProcesses = coreManager.getNonEmptyAssignments();
-    
+
     // Execute one instruction for each running process
     auto results = processManager.executeInstructionsForProcesses(runningProcesses);
-    
-    // Update core assignments for any processes that finished or went to sleep
+
     for (const auto& result : results) {
         if (result.isFinished) {
-            // Find which core this process was on and clear it
+            // Remove from core and mark finished
             for (int coreId = 0; coreId < coreManager.getCoreCount(); coreId++) {
                 if (coreManager.getAssignment(coreId) == result.name) {
                     coreManager.clearAssignment(coreId);
@@ -154,15 +167,21 @@ void CPUScheduler::handleProcessExecution() {
                 }
             }
         }
-        // Handle sleeping processes - they relinquish the CPU
         else if (result.process && result.process->getStatus() == ProcessStatus::Sleeping) {
-            // Find which core this process was on and clear it
+            // Remove from core
             for (int coreId = 0; coreId < coreManager.getCoreCount(); coreId++) {
                 if (coreManager.getAssignment(coreId) == result.name) {
                     coreManager.clearAssignment(coreId);
-                    processManager.setProcessCore(result.name, -1);  // Remove from core
+                    processManager.setProcessCore(result.name, -1);
                     break;
                 }
+            }
+            // Return to ready queue (optional depending on scheduler)
+            if (Config::getScheduler() == "fcfs") {
+                fcfsQueue.push(result.name);
+            }
+            else if (Config::getScheduler() == "rr") {
+                roundRobinQueue.push_back(result.name);
             }
         }
     }
@@ -247,76 +266,52 @@ void CPUScheduler::handleQuantumExpiration() {
 
 void CPUScheduler::scheduleWaitingProcesses() {
     std::lock_guard<std::mutex> queueLock(queueMutex);
-    
+
     String algorithm = Config::getScheduler();
     auto availableCores = coreManager.getAvailableCores();
-    
+
     for (int coreId : availableCores) {
         String processName = "";
-        
-        // Get next process from appropriate queue
+
         if (algorithm == "fcfs" && !fcfsQueue.empty()) {
             processName = fcfsQueue.front();
             fcfsQueue.pop();
-        } else if (algorithm == "rr" && !roundRobinQueue.empty()) {
+        }
+        else if (algorithm == "rr" && !roundRobinQueue.empty()) {
             processName = roundRobinQueue.front();
             roundRobinQueue.pop_front();
         }
-        
-        // Assign process to core if we found one
-        if (!processName.empty() && processManager.hasProcess(processName)) {
-            auto process = processManager.getProcess(processName);
-            
-            // Skip finished processes - don't reschedule them
-            if (process && process->getStatus() == ProcessStatus::Finished) {
-                continue;
+
+        if (processName.empty() || !processManager.hasProcess(processName)) {
+            continue;
+        }
+
+        auto process = processManager.getProcess(processName);
+        if (!process || process->getStatus() == ProcessStatus::Finished) {
+            continue;
+        }
+
+        // Do not allocate any pages here. Demand paging will occur in executeInstruction().
+
+        if (coreManager.tryAssignProcess(coreId, processName)) {
+            processManager.setProcessCore(processName, coreId);
+            processManager.updateProcessStatus(processName, ProcessStatus::Running);
+
+            if (algorithm == "rr") {
+                coreManager.setQuantum(coreId, Config::getQuantumCycles());
             }
-            
-            // CHECK MEMORY AVAILABILITY FIRST
-            if (!memoryManager.hasMemoryFor(processName)) {
-                // No memory available - revert to tail of ready queue
-                if (algorithm == "fcfs") {
-                    fcfsQueue.push(processName); // Add to back of FCFS queue
-                } else if (algorithm == "rr") {
-                    roundRobinQueue.push_back(processName); // Add to back of RR queue
-                }
-                continue; // Skip to next available core
+        }
+        else {
+            if (algorithm == "fcfs") {
+                fcfsQueue.push(processName);
             }
-            
-            // Try to allocate memory for the process
-            if (!memoryManager.allocateMemory(processName)) {
-                // Memory allocation failed - revert to tail of ready queue
-                if (algorithm == "fcfs") {
-                    fcfsQueue.push(processName);
-                } else if (algorithm == "rr") {
-                    roundRobinQueue.push_back(processName);
-                }
-                continue;
-            }
-            
-            // ATOMIC ASSIGNMENT: Assign core first, then update process state
-            if (coreManager.tryAssignProcess(coreId, processName)) {
-                // Set core on process IMMEDIATELY after core assignment succeeds
-                processManager.setProcessCore(processName, coreId);
-                // Then update status to Running
-                processManager.updateProcessStatus(processName, ProcessStatus::Running);
-                
-                // Set quantum for Round Robin
-                if (algorithm == "rr") {
-                    coreManager.setQuantum(coreId, Config::getQuantumCycles());
-                }
-            } else {
-                // If core assignment failed, deallocate memory and put process back in queue
-                memoryManager.deallocateMemory(processName);
-                if (algorithm == "fcfs") {
-                    fcfsQueue.push(processName);
-                } else if (algorithm == "rr") {
-                    roundRobinQueue.push_front(processName);
-                }
+            else if (algorithm == "rr") {
+                roundRobinQueue.push_front(processName);
             }
         }
     }
 }
+
 
 void CPUScheduler::startProcessGeneration() {
     if (generatorRunning.load()) return;
@@ -355,14 +350,21 @@ String CPUScheduler::generateProcessName() {
 std::shared_ptr<Process> CPUScheduler::createRandomProcess(const String& name) {
     int minIns = Config::getMinIns();
     int maxIns = Config::getMaxIns();
-    
+
     std::random_device rd;
     std::mt19937 gen(rd());
-    std::uniform_int_distribution<> dis(minIns, maxIns);
-    
-    int numInstructions = dis(gen);
-    return std::make_shared<Process>(name, nextProcessId - 1, numInstructions);
+    std::uniform_int_distribution<> insDis(minIns, maxIns);
+    std::uniform_int_distribution<> memDis(64, 256); // or use powers of 2 only
+
+    int numInstructions = insDis(gen);
+
+    // Generate valid memory size (power of 2 between 64 and 65536)
+    int allowedSizes[] = { 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536 };
+    int memorySize = allowedSizes[gen() % (sizeof(allowedSizes) / sizeof(allowedSizes[0]))];
+
+    return std::make_shared<Process>(name, nextProcessId - 1, numInstructions, memorySize);
 }
+
 
 // Utility functions
 bool CPUScheduler::isRunning() const { 
@@ -411,3 +413,46 @@ bool CPUScheduler::hasProcess(const String& processName) const {
 void CPUScheduler::printMemoryStatus() const {
     memoryManager.printMemoryStatus();
 } 
+
+void CPUScheduler::dumpBackingStoreToFile(const std::string& filename) const {
+    memoryManager.dumpBackingStoreToFile(filename);
+}
+
+int CPUScheduler::getNextProcessId() {
+    return nextProcessId++;
+}
+
+void CPUScheduler::executeProcessDirectly(const String& processName) {
+    auto process = processManager.getProcess(processName);
+    if (!process) {
+        std::cout << "Process not found: " << processName << std::endl;
+        return;
+    }
+
+    process->setMemoryManager(&memoryManager);
+    // Execute all instructions until the process is finished
+    std::cout << "Executing instructions for process " << processName << "..." << std::endl;
+    int executedCount = 0;
+
+    while (!process->hasFinished()) {
+        process->executeInstruction();
+        executedCount++;
+
+        // Debug output for larger instruction sets
+        if (executedCount % 5 == 0) {
+            std::cout << "Executed " << executedCount << " instructions..." << std::endl;
+        }
+    }
+
+    // Make sure memory changes persist by marking pages as accessed
+    for (const auto& [pageNum, entry] : process->getPageTable()) {
+        if (entry.valid) {
+            memoryManager.markPageAccessed(entry.frameNumber);
+        }
+    }
+
+    std::cout << "Executed " << executedCount << " total instructions." << std::endl;
+
+    // Ensure process is marked as finished
+    process->setStatus(ProcessStatus::Finished);
+}

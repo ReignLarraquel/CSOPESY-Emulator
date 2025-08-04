@@ -41,12 +41,20 @@ public:
     
     std::vector<CoreInfo> getActiveProcessesWithQuantum() const;
     void updateQuantums();  // Decrements all active quantum counters
+    int getActiveTicks() const { return activeTicks; }
+    int getIdleTicks() const { return idleTicks; }
+    int getTotalTicks() const { return totalTicks; }
+
     
 private:
     std::vector<String> coreAssignments;
     std::vector<int> quantumRemaining;
     mutable std::mutex coreMutex;
     int numCores;
+
+    int activeTicks = 0;
+    int idleTicks = 0;
+    int totalTicks = 0;
     
     // Private helpers (assume lock held)
     bool isValidCoreId(int coreId) const;

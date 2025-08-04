@@ -1,10 +1,12 @@
+﻿#define NOMINMAX
 #include "ConsoleManager.h"
 #include "MainConsole.h"
 #include "ProcessConsole.h"
+#include "MemoryManager.h"
 #include "Config.h"
+#include <algorithm>
 #include <iostream>
 #include <sstream>
-#include <algorithm>
 #include <cctype>
 #include <cstdlib>
 #include <iomanip>
@@ -27,6 +29,16 @@ void MainConsole::display() {
     showLogo();
     showWelcomeMessage();
     showCommandPrompt();
+}
+
+String toString(ProcessStatus status) {
+    switch (status) {
+    case ProcessStatus::Running: return "Running";
+    case ProcessStatus::Waiting: return "Waiting";
+    case ProcessStatus::Sleeping: return "Sleeping";
+    case ProcessStatus::Finished: return "Finished";
+    default: return "Unknown";
+    }
 }
 
 void MainConsole::process() {
@@ -84,8 +96,15 @@ bool MainConsole::handleCommand(const String& command) {
     else if (cmd == "report-util") {
         generateReport();
     }
+    else if (cmd == "process-smi") {
+        showProcessSMI();
+    }
     else if (cmd == "vmstat") {
         showMemoryStatus();
+    }
+    else if (cmd == "backing-store-dump") {
+        scheduler->dumpBackingStoreToFile();
+        std::cout << "Backing store dumped to csopesy-backing-store.txt\n";
     }
     else {
         showErrorMessage("Unknown command: " + command);
@@ -114,16 +133,17 @@ String MainConsole::toLower(const String& str) {
 
 void MainConsole::initializeSystem() {
     std::cout << "Initializing system from config.txt..." << std::endl;
-    
-    // Load configuration from config.txt
+
     bool configLoaded = Config::loadFromFile("config.txt");
     if (!configLoaded) {
         std::cout << "\033[33mUsing default configuration values.\033[0m" << std::endl;
     }
-    
-    // Create scheduler AFTER config is loaded
+
     scheduler = std::make_unique<CPUScheduler>();
-    
+
+    int coreCount = Config::getNumCpu();
+    coreManager = std::make_shared<CoreManager>(coreCount);
+
     isSystemInitialized = true;
     std::cout << "\033[32mSystem initialized successfully!\033[0m" << std::endl;
 }
@@ -139,25 +159,167 @@ void MainConsole::clearConsole() {
 
 void MainConsole::handleScreenCommand(const std::vector<String>& args) {
     if (args.size() < 2) {
-        showErrorMessage("Usage: screen -s <name> | screen -ls | screen -r <name>");
+        showErrorMessage("Missing screen target. Usage: screen [-s|-r|-ls] <name>");
         return;
     }
-    
-    String flag = args[1];
-    
-    if (flag == "-ls") {
+
+    if (args[1] == "-ls") {
         listProcesses();
     }
-    else if (flag == "-s" && args.size() >= 3) {
-        createProcess(args[2]);
+    else if (args[1] == "-c") {
+        // Handle custom instructions command
+        if (args.size() < 4) {
+            showErrorMessage("Invalid command. Usage: screen -c <process_name> <memory_size> \"<instructions>\"");
+            return;
+        }
+
+        String processName = args[2];
+        int memorySize = 512; // Default size
+        String instructionsStr;
+
+        if (args.size() >= 5) {
+            // Format: screen -c process_name memory_size "instructions"
+            try {
+                memorySize = std::stoi(args[3]);
+
+                // Get the instructions string - may have spaces and quotes
+                instructionsStr = args[4];
+
+                // Remove surrounding quotes if present
+                if (instructionsStr.front() == '"' && instructionsStr.back() == '"') {
+                    instructionsStr = instructionsStr.substr(1, instructionsStr.length() - 2);
+                }
+
+                // Validate memory size: must be power of 2 between 64 and 65536
+                if (memorySize < 64 || memorySize > 65536 || (memorySize & (memorySize - 1)) != 0) {
+                    showErrorMessage("Invalid memory size. Must be a power of 2 between 64 and 65536.");
+                    return;
+                }
+            }
+            catch (const std::exception&) {
+                showErrorMessage("Invalid memory size or instruction format");
+                return;
+            }
+        }
+        else {
+            // Format: screen -c process_name "instructions"
+            instructionsStr = args[3];
+
+            // Remove surrounding quotes if present
+            if (instructionsStr.front() == '"' && instructionsStr.back() == '"') {
+                instructionsStr = instructionsStr.substr(1, instructionsStr.length() - 2);
+            }
+        }
+
+        // Create process with custom instructions
+        try {
+            int numInstructions = 50; // Default for custom instructions
+            auto newProcess = std::make_shared<Process>(
+                processName, scheduler->getNextProcessId(), numInstructions, memorySize, instructionsStr);
+
+            scheduler->addProcess(newProcess);
+
+            std::cout << "\033[32mProcess " << processName << " created with custom instructions!\033[0m\n";
+            std::cout << "Memory: " << memorySize << " bytes | ID: " << newProcess->getId() << std::endl;
+
+            // Execute instructions immediately for custom processes
+            std::cout << "Executing custom instructions..." << std::endl;
+            scheduler->executeProcessDirectly(processName);
+            std::cout << "Instructions executed successfully.\033[0m\n";
+
+            // Switch to process console automatically
+            String consoleName = "PROCESS_" + processName;
+            auto console = std::make_shared<ProcessConsole>(*scheduler, newProcess);
+            ConsoleManager::getInstance()->registerConsole(consoleName, console);
+            ConsoleManager::getInstance()->switchConsole(consoleName);
+        }
+        catch (const std::exception& e) {
+            showErrorMessage(String("Failed to create process: ") + e.what());
+        }
     }
-    else if (flag == "-r" && args.size() >= 3) {
-        attachToProcess(args[2]);
+    else if (args[1] == "-s") {
+        if (args.size() < 4) {
+            showErrorMessage("Missing process name or memory size. Usage: screen -s <process_name> <memory_size>");
+            return;
+        }
+
+        String processName = args[2];
+        int memorySize = std::stoi(args[3]);
+
+        // Validate memory size: must be power of 2 between 64 and 65536
+        if (memorySize < 64 || memorySize > 65536 || (memorySize & (memorySize - 1)) != 0) {
+            showErrorMessage("Invalid memory size. Must be a power of 2 between 64 and 65536.");
+            return;
+        }
+
+        // Create the process if it doesn’t exist
+        if (!scheduler->hasProcess(processName)) {
+            createProcess(processName, memorySize);
+        }
+
+        auto process = scheduler->getProcess(processName);
+        String consoleName = "PROCESS_" + processName;
+
+        if (!ConsoleManager::getInstance()->hasConsole(consoleName)) {
+            auto console = std::make_shared<ProcessConsole>(*scheduler, process);
+            ConsoleManager::getInstance()->registerConsole(consoleName, console);
+        }
+
+        ConsoleManager::getInstance()->switchConsole(consoleName);
     }
-    else {
-        showErrorMessage("Invalid screen command");
+    else if (args[1] == "-r") {
+        if (args.size() < 3) {
+            showErrorMessage("Missing process name. Usage: screen -r <process>");
+            return;
+        }
+
+        String processName = args[2];
+        String consoleName = "PROCESS_" + processName;
+
+        if (ConsoleManager::getInstance()->hasConsole(consoleName)) {
+            ConsoleManager::getInstance()->switchConsole(consoleName);
+            return;
+        }
+
+        if (scheduler->hasProcess(processName)) {
+            auto process = scheduler->getProcess(processName);
+            
+            // Check if process was terminated due to memory access violation
+            if (process->wasTerminatedDueToMemoryViolation()) {
+                // Extract the time part from the timestamp (format: "(MM/DD/YYYY hh:mm:ssAM/PM)")
+                std::string timestamp = process->getMemoryViolationTimestamp();
+                size_t timeStart = timestamp.find(' ', timestamp.find(' ') + 1) + 1; // Find second space and add 1
+                std::string timeOnly = timestamp.substr(timeStart, 
+                    timestamp.find(')', timeStart) - timeStart);
+                
+                std::ostringstream hexAddr;
+                hexAddr << "0x" << std::hex << std::uppercase << process->getMemoryViolationAddress();
+                
+                showErrorMessage("Process " + processName + 
+                    " shut down due to memory access violation error that occurred at " + 
+                    timeOnly + ". " + hexAddr.str() + " invalid.");
+                return;
+            }
+            
+            // Process exists but is finished normally - standard handling
+            if (process->getStatus() == ProcessStatus::Finished) {
+                showErrorMessage("Process " + processName + " already finished.");
+                return;
+            }
+            
+            // Create and switch to process console
+            auto console = std::make_shared<ProcessConsole>(*scheduler, process);
+            ConsoleManager::getInstance()->registerConsole(consoleName, console);
+            ConsoleManager::getInstance()->switchConsole(consoleName);
+        }
+        else {
+            showErrorMessage("No existing process or screen for: " + processName);
+        }
     }
 }
+
+
+
 
 void MainConsole::startScheduler() {
     if (!scheduler) {
@@ -268,41 +430,135 @@ void MainConsole::generateReport() {
 }
 
 void MainConsole::showMemoryStatus() {
-    if (!scheduler) {
+    if (!scheduler || !coreManager) {
         showUninitializedError();
         return;
     }
-    
-    scheduler->printMemoryStatus();
+
+    MemoryManager& mm = scheduler->getMemoryManager();  // Get the one inside the scheduler
+
+    int totalMem = Config::getMaxOverallMem();
+    int frameSize = Config::getMemPerFrame();
+    int totalPages = mm.getTotalFrames();
+    int usedPages = mm.getUsedFrameCount();
+    int freePages = mm.getFreeFrameCount();
+    int usedMem = usedPages * frameSize;
+    int freeMem = freePages * frameSize;
+
+    std::cout << "\n=== VMSTAT ===" << std::endl;
+
+    // Memory
+    std::cout << "Memory Info:" << std::endl;
+    std::cout << "Total: " << totalMem << " bytes" << std::endl;
+    std::cout << "Used : " << usedMem << " bytes" << std::endl;
+    std::cout << "Free : " << freeMem << " bytes" << std::endl;
+
+    // Pages
+    std::cout << "Pages:" << std::endl;
+    std::cout << "Total: " << totalPages << " pages" << std::endl;
+    std::cout << "Used : " << usedPages << " pages" << std::endl;
+    std::cout << "Free : " << freePages << " pages" << std::endl;
+    std::cout << "Page Size: " << frameSize << " bytes\n" << std::endl;
+
+    // CPU
+    std::cout << "CPU Ticks:" << std::endl;
+    std::cout << "Active : " << coreManager->getActiveTicks() << std::endl;
+    std::cout << "Idle   : " << coreManager->getIdleTicks() << std::endl;
+    std::cout << "Total  : " << coreManager->getTotalTicks() << std::endl;
+
+    // Paging
+    std::cout << "\nPaging:" << std::endl;
+    std::cout << "Pages Paged In : " << mm.getPagedInCount() << std::endl;
+    std::cout << "Pages Paged Out: " << mm.getPagedOutCount() << std::endl;
+
+    std::cout << "\nProcesses by status:" << std::endl;
+    std::cout << "Running : " << scheduler->getProcessesByStatus(ProcessStatus::Running).size() << std::endl;
+    std::cout << "Waiting : " << scheduler->getProcessesByStatus(ProcessStatus::Waiting).size() << std::endl;
+    std::cout << "Sleeping: " << scheduler->getProcessesByStatus(ProcessStatus::Sleeping).size() << std::endl;
+    std::cout << "Finished: " << scheduler->getProcessesByStatus(ProcessStatus::Finished).size() << std::endl;
+
+    std::cout << "===================" << std::endl;
 }
 
-void MainConsole::createProcess(const String& processName) {
+void MainConsole::showProcessSMI() {
     if (!scheduler) {
         showUninitializedError();
         return;
     }
-    
-    // Check if process already exists
+
+    std::map<String, int> usedPagesPerProcess;
+    int totalUsedPages = 0;
+
+    for (const String& name : scheduler->getAllProcessNames()) {
+        auto proc = scheduler->getProcess(name);
+        if (!proc) continue;
+
+        int usedPages = 0;
+        for (const auto& [pageNum, entry] : proc->getPageTable()) {
+            if (entry.valid) usedPages++;
+        }
+
+        if (usedPages > 0) {
+            usedPagesPerProcess[name] = usedPages;
+            totalUsedPages += usedPages;
+        }
+    }
+
+    int totalMem = Config::getMaxOverallMem();
+    int frameSize = Config::getMemPerFrame();
+    int totalFrames = totalMem / frameSize;
+
+    // Cap used pages to the number of physical frames
+    int cappedUsedPages = std::min(totalUsedPages, totalFrames);
+    int usedMem = cappedUsedPages * frameSize;
+    int freeMem = totalMem - usedMem;
+
+    float memUtil = (totalMem == 0) ? 0 : ((float)usedMem / totalMem) * 100;
+
+    int activeCores = scheduler->getCoreManager().getUsedCoreCount();
+    int totalCores = scheduler->getCoreManager().getCoreCount();
+    float cpuUtil = (totalCores == 0) ? 0 : ((float)activeCores / totalCores) * 100;
+
+    std::cout << "\n=== PROCESS-SMI SUMMARY ===" << std::endl;
+    std::cout << "CPU-Util: " << std::fixed << std::setprecision(0) << cpuUtil << "%" << std::endl;
+    std::cout << "Memory Usage: " << usedMem << " / " << totalMem << " bytes" << std::endl;
+    std::cout << "Memory-Util: " << std::fixed << std::setprecision(0) << memUtil << "%" << std::endl;
+    std::cout << std::endl;
+
+    std::cout << "Processes in memory:" << std::endl;
+    for (const auto& [procName, pageCount] : usedPagesPerProcess) {
+        std::cout << "- " << procName << " | Pages: " << pageCount
+            << " | Mem: " << (pageCount * frameSize) << " bytes" << std::endl;
+    }
+
+    std::cout << "=============================" << std::endl;
+}
+
+
+void MainConsole::createProcess(const String& processName, int memorySize) {
+    if (!scheduler) {
+        showUninitializedError();
+        return;
+    }
+
     if (scheduler->hasProcess(processName)) {
         showErrorMessage("Process " + processName + " already exists.");
         return;
     }
-    
-    std::cout << "Creating process: " << processName << std::endl;
-    
-    // Use config values for instruction count
+
+    std::cout << "Creating process: " << processName << " with " << memorySize << " bytes of memory\n";
+
     int minIns = Config::getMinIns();
     int maxIns = Config::getMaxIns();
     int numInstructions = minIns + (rand() % (maxIns - minIns + 1));
-    
-    auto newProcess = std::make_shared<Process>(processName, nextProcessId++, numInstructions);
-    
-    // Add to scheduler (which now handles everything)
+
+    auto newProcess = std::make_shared<Process>(processName, scheduler->getNextProcessId(), numInstructions, memorySize);
     scheduler->addProcess(newProcess);
-    
-    std::cout << "\033[32mProcess " << processName << " created successfully!\033[0m" << std::endl;
+
+    std::cout << "\033[32mProcess " << processName << " created successfully!\033[0m\n";
     std::cout << "Instructions: " << numInstructions << " | ID: " << newProcess->getId() << std::endl;
 }
+
 
 void MainConsole::listProcesses() {
     if (!scheduler) {
@@ -375,33 +631,29 @@ void MainConsole::attachToProcess(const String& processName) {
         showUninitializedError();
         return;
     }
-    
-    // Check if process exists
+
     if (!scheduler->hasProcess(processName)) {
         showErrorMessage("Process " + processName + " not found.");
         return;
     }
-    
-    // Check if process is finished
+
     auto process = scheduler->getProcess(processName);
     if (process->getStatus() == ProcessStatus::Finished) {
-        showErrorMessage("Process " + processName + " not found.");
+        showErrorMessage("Process " + processName + " already finished.");
         return;
     }
-    
-    // Create and register ProcessConsole for this process
+
     String consoleName = "PROCESS_" + processName;
-    auto processConsole = std::make_shared<ProcessConsole>(process);
-    
-    // Register the console dynamically and switch to it
+    auto processConsole = std::make_shared<ProcessConsole>(*scheduler, process);
     ConsoleManager::getInstance()->registerConsole(consoleName, processConsole);
     ConsoleManager::getInstance()->switchConsole(consoleName);
 }
 
+
 void MainConsole::showWelcomeMessage() {
     std::cout << "\033[32mHello, Welcome to CSOPESY commandline!\033[0m" << std::endl;
-    std::cout << "\nDevelopers: \n Ambrosio, Lorenzo Aivin F. \n Larraquel, Reign Elaiza D.\n" << std::endl;
-    std::cout << "Last Updated: 06-28-2025\n" << std::endl;
+    std::cout << "\nDevelopers: \n Ambrosio, Lorenzo Aivin F. \n Larraquel, Reign Elaiza D.\n Cruz, Giovanni Jonathan R.\n" << std::endl;
+    std::cout << "Last Updated: 08-05-2025\n" << std::endl;
     std::cout << "Type \033[33m'exit'\033[0m to quit, \033[33m'clear'\033[0m to clear the screen" << std::endl;
     
     if (!isSystemInitialized) {
@@ -430,4 +682,4 @@ void MainConsole::showErrorMessage(const String& error) {
 
 void MainConsole::showUninitializedError() {
     std::cout << "\033[31mError: System not initialized. Please run 'initialize' first.\033[0m" << std::endl;
-} 
+}

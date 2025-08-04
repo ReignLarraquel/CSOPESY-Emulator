@@ -25,6 +25,8 @@ public:
     std::shared_ptr<Process> getProcess(const String& processName) const;
     std::vector<String> getProcessesByStatus(ProcessStatus status) const;
     std::vector<String> getAllProcessNames() const;
+    std::map<String, std::shared_ptr<Process>> getAllProcesses() const;
+
     
     // Batch operations (for tick processing)
     struct ProcessInfo {
