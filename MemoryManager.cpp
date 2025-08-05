@@ -1,4 +1,4 @@
-﻿#include "MemoryManager.h"
+#include "MemoryManager.h"
 #include "Config.h"
 #include "Process.h"
 #include <iostream>
@@ -65,14 +65,10 @@ int MemoryManager::allocatePage(Process* proc, int pageNumber) {
             int victimPage = frame.pageNumber;
             String victimProcessName = frame.processName;
 
-            // TOBEDELETED: MO2 backing store - save victim page data before eviction
-            auto victimProcess = allProcesses.find(victimProcessName);
-            if (victimProcess != allProcesses.end()) {
-                // TOBEDELETED: Get page data from victim process
-                auto memoryDump = victimProcess->second->getMemoryDump();
-                std::unordered_map<uint32_t, uint16_t> pageData;
-                
-                // TOBEDELETED: Extract data for this specific page
+                            auto victimProcess = allProcesses.find(victimProcessName);
+                if (victimProcess != allProcesses.end()) {
+                    auto memoryDump = victimProcess->second->getMemoryDump();
+                    std::unordered_map<uint32_t, uint16_t> pageData;
                 int pageSize = Config::getMemPerFrame();
                 uint32_t pageStartAddress = victimPage * pageSize;
                 uint32_t pageEndAddress = pageStartAddress + pageSize;
@@ -81,13 +77,12 @@ int MemoryManager::allocatePage(Process* proc, int pageNumber) {
                     if (address >= pageStartAddress && address < pageEndAddress) {
                         pageData[address] = value;
                     }
+                                    }
+                    
+                    if (!pageData.empty()) {
+                        savePageToBackingStore(victimProcessName, victimPage, pageData);
+                    }
                 }
-                
-                // TOBEDELETED: Save page data to backing store if it has content
-                if (!pageData.empty()) {
-                    savePageToBackingStore(victimProcessName, victimPage, pageData);
-                }
-            }
 
             // Invalidate the victim in its process's page table
             for (const auto& [name, process] : allProcesses) {
@@ -147,18 +142,20 @@ bool MemoryManager::allocateMemory(const String& processName) {
     std::shared_ptr<Process> proc = procIt->second;
     if (!proc) return false;
 
+    int processMemorySizeNeeded = proc->getMemorySize();
+
     // Try to allocate a memory block (just for memory_stamp)
     for (auto it = memoryBlocks.begin(); it != memoryBlocks.end(); ++it) {
-        if (!it->isAllocated && it->size >= processMemorySize) {
+        if (!it->isAllocated && it->size >= processMemorySizeNeeded) {
             int startAddr = it->startAddress;
-            if (it->size == processMemorySize) {
+            if (it->size == processMemorySizeNeeded) {
                 it->isAllocated = true;
                 it->processName = processName;
             }
             else {
-                MemoryBlock allocatedBlock(startAddr, processMemorySize, processName, true);
-                MemoryBlock remainingBlock(startAddr + processMemorySize,
-                    it->size - processMemorySize, "", false);
+                MemoryBlock allocatedBlock(startAddr, processMemorySizeNeeded, processName, true);
+                MemoryBlock remainingBlock(startAddr + processMemorySizeNeeded,
+                    it->size - processMemorySizeNeeded, "", false);
                 *it = allocatedBlock;
                 memoryBlocks.insert(it + 1, remainingBlock);
             }
@@ -166,12 +163,11 @@ bool MemoryManager::allocateMemory(const String& processName) {
             processToMemoryMap[processName] = startAddr;
 
             // ❌ REMOVE eager page allocation
-            // int pagesNeeded = processMemorySize / frameSize;
+            // int pagesNeeded = processMemorySizeNeeded / frameSize;
             // for (int i = 0; i < pagesNeeded; ++i) {
             //     allocatePage(proc.get(), i);
             // }
 
-            // TOBEDELETED: Memory block reserved for process
             return true;
         }
     }
@@ -318,11 +314,11 @@ void MemoryManager::printMemoryStatus() const {
 }
 
 int MemoryManager::getUsedFrameCount() const {
-    return static_cast<int>(std::count(freeFrameList.begin(), freeFrameList.end(), false)); // TOBEDELETED: Fix C4244 warning
+    return static_cast<int>(std::count(freeFrameList.begin(), freeFrameList.end(), false));
 }
 
 int MemoryManager::getFreeFrameCount() const {
-    return static_cast<int>(std::count(freeFrameList.begin(), freeFrameList.end(), true)); // TOBEDELETED: Fix C4244 warning
+    return static_cast<int>(std::count(freeFrameList.begin(), freeFrameList.end(), true));
 }
 
 int MemoryManager::getTotalFrames() const {
@@ -418,7 +414,6 @@ bool MemoryManager::loadPageFromBackingStore(const String& processName, int page
         }
         
         if (storedProcessName == processName && storedPageNumber == pageNumber) {
-            // TOBEDELETED: Found the page - load the data
             pageData.clear();
             for (uint32_t i = 0; i < dataCount; ++i) {
                 uint32_t address;
@@ -432,7 +427,6 @@ bool MemoryManager::loadPageFromBackingStore(const String& processName, int page
             inFile.close();
             return true;
         } else {
-            // TOBEDELETED: Skip this page's data
             for (uint32_t i = 0; i < dataCount; ++i) {
                 uint32_t address;
                 uint16_t value;

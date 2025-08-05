@@ -70,11 +70,10 @@ private:
     // Process instruction system
     std::vector<Instruction> instructions;              // Generated instruction sequence
     int currentInstructionIndex;                        // Current instruction being executed
-    // TOBEDELETED: MO2 specification - Variables stored in 64-byte symbol table segment (page 0) not std::map
-    std::map<std::string, uint32_t> variableAddresses;  // TOBEDELETED: Variable name -> memory address mapping for symbol table
-    uint32_t nextVariableAddress;                       // TOBEDELETED: Next available address in symbol table (starts at 0x0)
-    static const uint32_t SYMBOL_TABLE_SIZE = 64;       // TOBEDELETED: 64-byte symbol table segment size
-    static const uint32_t SYMBOL_TABLE_START = 0;       // TOBEDELETED: Symbol table starts at address 0x0
+    std::map<std::string, uint32_t> variableAddresses;
+    uint32_t nextVariableAddress;
+    static const uint32_t SYMBOL_TABLE_SIZE = 64;
+    static const uint32_t SYMBOL_TABLE_START = 0;
     std::vector<int> forLoopStack;                      // Stack for nested FOR loops
     std::vector<int> forCounterStack;                   // Current iteration counters
     int sleepCyclesRemaining;                           // For SLEEP instruction
@@ -98,9 +97,14 @@ public:
     int getRemainingInstructions() const;
     bool hasFinished() const;
     ProcessStatus getStatus() const;
+    
+
+    const std::vector<std::string>& getPrintOutputs() const { return printOutputs; }
     void setStatus(ProcessStatus newStatus);
     int getAssignedCore() const;
     int getMemoryRequirement() const;
+
+    int getMemorySize() const { return memoryRequirement; }
     void setAssignedCore(int coreId);
     const std::string& getName() const;
     int getId() const;
@@ -156,7 +160,7 @@ private:
     std::string generateRandomVariableName();
     std::string formatInstructionForLog(const Instruction& instr);
     
-    // TOBEDELETED: String expression evaluation for PRINT concatenation
+
     std::string evaluateStringExpression(const std::string& expression);
 
     std::unordered_map<uint32_t, uint16_t> memoryValues; // Address -> Value
@@ -164,4 +168,7 @@ private:
     void writeMemoryValue(uint32_t address, uint16_t value);
     void executeReadInstruction(const Instruction& instr);
     void executeWriteInstruction(const Instruction& instr);
+    
+
+    std::vector<std::string> printOutputs;
 };

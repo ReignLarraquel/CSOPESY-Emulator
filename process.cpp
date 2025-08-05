@@ -307,20 +307,27 @@ Process::Process(const std::string& name, int id, int numInstructions, int memor
         std::ostringstream entry;
         entry << getTimestamp() << " Core:" << assignedCore << " ";
         
+        std::string printOutput; // TOBEDELETED: Store actual PRINT output separately
+        
         if (instr.arg2 == "EXPRESSION") {
             // TOBEDELETED: Evaluate string concatenation expression like "Result: " + varC
             std::string result = evaluateStringExpression(instr.arg1);
             entry << "\"" << result << "\"";
+            printOutput = result; // TOBEDELETED: Store the actual output
         } else if (instr.arg1.find("Value from:") == 0) {
             // Extract variable name and print its value
             std::string varName = instr.arg1.substr(12); // Remove "Value from: "
             uint16_t value = getVariableValue(varName);
-            entry << "\"" << instr.arg1 << " " << value << "\"";
+            std::string fullOutput = instr.arg1 + " " + std::to_string(value);
+            entry << "\"" << fullOutput << "\"";
+            printOutput = fullOutput; // TOBEDELETED: Store the actual output
         } else {
             entry << "\"" << instr.arg1 << "\"";
+            printOutput = instr.arg1; // TOBEDELETED: Store the actual output
         }
         
         logs.push_back(entry.str());
+        printOutputs.push_back(printOutput); // TOBEDELETED: Track PRINT outputs separately
     }
 
     void Process::executeDeclareInstruction(const Instruction& instr) {

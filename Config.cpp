@@ -20,7 +20,7 @@ namespace Config {
         g_config.maxOverallMem = 16384;
         g_config.memPerFrame = 16;
         g_config.memPerProc = 4096;
-        // TOBEDELETED: MO2 defaults for auto-generated process memory range
+
         g_config.minMemPerProc = 64;
         g_config.maxMemPerProc = 1024;
         g_initialized = true;
@@ -78,7 +78,7 @@ namespace Config {
                 else if (key == "mem-per-proc") {
                     g_config.memPerProc = std::stoi(value);
                 }
-                // TOBEDELETED: MO2 config parameters for auto-generated process memory range
+    
                 else if (key == "min-mem-per-proc") {
                     g_config.minMemPerProc = std::stoi(value);
                 }
@@ -102,7 +102,7 @@ namespace Config {
         std::cout << "  max-overall-mem: " << g_config.maxOverallMem << std::endl;
         std::cout << "  mem-per-frame: " << g_config.memPerFrame << std::endl;
         std::cout << "  mem-per-proc: " << g_config.memPerProc << std::endl;
-        // TOBEDELETED: MO2 debug output for new memory range parameters
+    
         std::cout << "  min-mem-per-proc: " << g_config.minMemPerProc << std::endl;
         std::cout << "  max-mem-per-proc: " << g_config.maxMemPerProc << std::endl;
         
@@ -123,7 +123,7 @@ namespace Config {
     int getMemPerFrame() { return g_initialized ? g_config.memPerFrame : 16; }
     int getMemPerProc() { return g_initialized ? g_config.memPerProc : 4096; }
     
-    // TOBEDELETED: MO2 getter implementations for auto-generated process memory range
+
     int getMinMemPerProc() { return g_initialized ? g_config.minMemPerProc : 64; }
     int getMaxMemPerProc() { return g_initialized ? g_config.maxMemPerProc : 1024; }
     

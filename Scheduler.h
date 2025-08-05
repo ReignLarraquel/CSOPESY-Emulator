@@ -23,9 +23,8 @@ public:
     void stop();
     bool isRunning() const;
     
-    // TOBEDELETED: Separate CPU execution from process generation
-    void startCpuExecution();  // TOBEDELETED: Start CPU tick manager (called during initialize)
-    void stopCpuExecution();   // TOBEDELETED: Stop CPU execution (called during shutdown)
+    void startCpuExecution();
+    void stopCpuExecution();
     
     // Process management
     void addProcess(std::shared_ptr<Process> process);

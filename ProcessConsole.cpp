@@ -41,39 +41,48 @@ void ProcessConsole::onEnabled() {
         return;
     }
 
-    // TOBEDELETED: Fixed screen switching - display console and let main loop handle input
+
     display();
 }
 
 void ProcessConsole::display() {
-    // TOBEDELETED: Revert - clear screen when switching to process console
     system("cls");
     
     std::cout << "----------------------------------------\n";
     std::cout << "Process Console: " << (attachedProcess ? attachedProcess->getName() : "Unknown") << "\n";
     std::cout << "----------------------------------------\n\n";
     
-    // TOBEDELETED: CRITICAL FIX - Automatically show process logs including PRINT output!
     if (attachedProcess) {
-        std::cout << "Process Logs:\n";
-        attachedProcess->displayLogs();
-        std::cout << "\n";
+
+        const auto& printOutputs = attachedProcess->getPrintOutputs();
+        if (!printOutputs.empty()) {
+            std::cout << "\033[1;36m=== PRINT OUTPUT ===\033[0m\n";  // Cyan header
+            for (const auto& output : printOutputs) {
+                std::cout << "\033[1;32m" << output << "\033[0m\n";  // Green PRINT output
+            }
+            std::cout << "\n";
+        }
         
         // Show process status
         if (attachedProcess->hasFinished()) {
-            std::cout << "Status: FINISHED\n\n";
+            std::cout << "Status: \033[1;31mFINISHED\033[0m\n\n";  // Red
         } else {
-            std::cout << "Status: " 
+            std::cout << "Status: \033[1;33m" 
                      << (attachedProcess->getStatus() == ProcessStatus::Running ? "RUNNING" :
                          attachedProcess->getStatus() == ProcessStatus::Waiting ? "WAITING" : "SLEEPING")
-                     << " - Current line: " << (attachedProcess->getTotalInstructions() - attachedProcess->getRemainingInstructions())
-                     << " / " << attachedProcess->getTotalInstructions() << "\n\n";
+                     << "\033[0m - Line: " << (attachedProcess->getTotalInstructions() - attachedProcess->getRemainingInstructions())
+                     << " / " << attachedProcess->getTotalInstructions() << "\n\n";  // Yellow status
         }
+        
+
+        std::cout << "\033[1;90m=== EXECUTION LOGS ===\033[0m\n";  // Dark gray header
+        attachedProcess->displayLogs();
+        std::cout << "\n";
     }
 }
 
 void ProcessConsole::process() {
-    // TOBEDELETED: Handle input properly for ProcessConsole
+
     std::cout << "\033[1;32mroot:\\>\033[0m "; // Green and bold prompt
     std::cout.flush();
     
@@ -85,7 +94,6 @@ void ProcessConsole::process() {
         if (shouldExit) {
             ConsoleManager::getInstance()->switchConsole(MAIN_CONSOLE);
         } else {
-            // TOBEDELETED: Refresh display after any command to show new PRINT output
             display();
         }
     }
@@ -112,7 +120,7 @@ bool ProcessConsole::handleCommand(const String& command) {
         return false;
     }
     else if (cmd == "refresh" || cmd == "logs") {
-        // TOBEDELETED: Manual refresh command to see latest PRINT output
+
         // display() will be called automatically after this returns
         return false;
     }
