@@ -62,6 +62,10 @@ public:
     int getPagedInCount() const { return pagedInCount; }
     int getPagedOutCount() const { return pagedOutCount; }
 
+    // TOBEDELETED: MO2 backing store - real data storage functionality
+    void savePageToBackingStore(const String& processName, int pageNumber, const std::unordered_map<uint32_t, uint16_t>& pageData);
+    bool loadPageFromBackingStore(const String& processName, int pageNumber, std::unordered_map<uint32_t, uint16_t>& pageData);
+
     // Whole-process allocation (FCFS-style)
     bool allocateMemory(const String& processName);
     void markPageAccessed(int frameNumber);

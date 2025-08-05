@@ -15,6 +15,9 @@ namespace Config {
         int maxOverallMem;
         int memPerFrame;
         int memPerProc;
+        // TOBEDELETED: MO2 addition - Memory range for auto-generated processes
+        int minMemPerProc;
+        int maxMemPerProc;
     };
 
     // Configuration management functions
@@ -34,6 +37,10 @@ namespace Config {
     int getMaxOverallMem();
     int getMemPerFrame();
     int getMemPerProc();
+    
+    // TOBEDELETED: MO2 additions - Memory range getters for auto-generated processes
+    int getMinMemPerProc();
+    int getMaxMemPerProc();
     
     // System state
     bool isInitialized();

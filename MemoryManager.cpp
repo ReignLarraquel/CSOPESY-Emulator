@@ -43,6 +43,16 @@ int MemoryManager::allocatePage(Process* proc, int pageNumber) {
             frameTable[i] = { proc->getName(), pageNumber, true, true }; // referenced = true
             pageTable[pageNumber] = { i, true, false };
             pagedInCount++;
+
+            // TOBEDELETED: MO2 backing store - try to load page data from backing store
+            std::unordered_map<uint32_t, uint16_t> pageData;
+            if (loadPageFromBackingStore(proc->getName(), pageNumber, pageData)) {
+                // TOBEDELETED: Restore page data from backing store
+                for (const auto& [address, value] : pageData) {
+                    proc->setMemoryValueAt(address, value);
+                }
+            }
+
             return i;
         }
     }
@@ -53,6 +63,31 @@ int MemoryManager::allocatePage(Process* proc, int pageNumber) {
 
         if (!frame.referenced) {
             int victimPage = frame.pageNumber;
+            String victimProcessName = frame.processName;
+
+            // TOBEDELETED: MO2 backing store - save victim page data before eviction
+            auto victimProcess = allProcesses.find(victimProcessName);
+            if (victimProcess != allProcesses.end()) {
+                // TOBEDELETED: Get page data from victim process
+                auto memoryDump = victimProcess->second->getMemoryDump();
+                std::unordered_map<uint32_t, uint16_t> pageData;
+                
+                // TOBEDELETED: Extract data for this specific page
+                int pageSize = Config::getMemPerFrame();
+                uint32_t pageStartAddress = victimPage * pageSize;
+                uint32_t pageEndAddress = pageStartAddress + pageSize;
+                
+                for (const auto& [address, value] : memoryDump) {
+                    if (address >= pageStartAddress && address < pageEndAddress) {
+                        pageData[address] = value;
+                    }
+                }
+                
+                // TOBEDELETED: Save page data to backing store if it has content
+                if (!pageData.empty()) {
+                    savePageToBackingStore(victimProcessName, victimPage, pageData);
+                }
+            }
 
             // Invalidate the victim in its process's page table
             for (const auto& [name, process] : allProcesses) {
@@ -74,6 +109,15 @@ int MemoryManager::allocatePage(Process* proc, int pageNumber) {
             frame = { proc->getName(), pageNumber, true, true }; // referenced = true
             pageTable[pageNumber] = { clockHand, true, false };
             pagedInCount++;
+
+            // TOBEDELETED: MO2 backing store - try to load page data from backing store
+            std::unordered_map<uint32_t, uint16_t> pageData;
+            if (loadPageFromBackingStore(proc->getName(), pageNumber, pageData)) {
+                // TOBEDELETED: Restore page data from backing store
+                for (const auto& [address, value] : pageData) {
+                    proc->setMemoryValueAt(address, value);
+                }
+            }
 
             int allocatedFrame = clockHand;
             clockHand = (clockHand + 1) % numFrames;
@@ -127,7 +171,7 @@ bool MemoryManager::allocateMemory(const String& processName) {
             //     allocatePage(proc.get(), i);
             // }
 
-            std::cout << "[DEBUG] Reserved memory block for process " << processName << std::endl;
+            // TOBEDELETED: Memory block reserved for process
             return true;
         }
     }
@@ -274,11 +318,11 @@ void MemoryManager::printMemoryStatus() const {
 }
 
 int MemoryManager::getUsedFrameCount() const {
-    return std::count(freeFrameList.begin(), freeFrameList.end(), false);
+    return static_cast<int>(std::count(freeFrameList.begin(), freeFrameList.end(), false)); // TOBEDELETED: Fix C4244 warning
 }
 
 int MemoryManager::getFreeFrameCount() const {
-    return std::count(freeFrameList.begin(), freeFrameList.end(), true);
+    return static_cast<int>(std::count(freeFrameList.begin(), freeFrameList.end(), true)); // TOBEDELETED: Fix C4244 warning
 }
 
 int MemoryManager::getTotalFrames() const {
@@ -312,4 +356,94 @@ void MemoryManager::dumpBackingStoreToFile(const std::string& filename) const {
     }
 
     outFile.close();
+}
+
+// TOBEDELETED: MO2 backing store - save actual page data to file
+void MemoryManager::savePageToBackingStore(const String& processName, int pageNumber, const std::unordered_map<uint32_t, uint16_t>& pageData) {
+    // TOBEDELETED: Create backing store data file with binary format for efficiency
+    std::string filename = "csopesy-backing-store-data.bin";
+    std::ofstream outFile(filename, std::ios::binary | std::ios::app);
+    if (!outFile.is_open()) {
+        std::cerr << "Error: Failed to open backing store data file for writing.\n";
+        return;
+    }
+    
+    // TOBEDELETED: Write page header: process name length, process name, page number, data count
+    uint32_t nameLength = static_cast<uint32_t>(processName.length()); // TOBEDELETED: Fix C4267 warning
+    outFile.write(reinterpret_cast<const char*>(&nameLength), sizeof(nameLength));
+    outFile.write(processName.c_str(), nameLength);
+    outFile.write(reinterpret_cast<const char*>(&pageNumber), sizeof(pageNumber));
+    
+    uint32_t dataCount = static_cast<uint32_t>(pageData.size()); // TOBEDELETED: Fix C4267 warning
+    outFile.write(reinterpret_cast<const char*>(&dataCount), sizeof(dataCount));
+    
+    // TOBEDELETED: Write page data: address-value pairs
+    for (const auto& [address, value] : pageData) {
+        outFile.write(reinterpret_cast<const char*>(&address), sizeof(address));
+        outFile.write(reinterpret_cast<const char*>(&value), sizeof(value));
+    }
+    
+    outFile.close();
+}
+
+// TOBEDELETED: MO2 backing store - load actual page data from file
+bool MemoryManager::loadPageFromBackingStore(const String& processName, int pageNumber, std::unordered_map<uint32_t, uint16_t>& pageData) {
+    // TOBEDELETED: Read backing store data file to find the page
+    std::string filename = "csopesy-backing-store-data.bin";
+    std::ifstream inFile(filename, std::ios::binary);
+    if (!inFile.is_open()) {
+        return false; // TOBEDELETED: No backing store file exists yet
+    }
+    
+    // TOBEDELETED: Search through the file for the matching process and page
+    while (inFile.good()) {
+        uint32_t nameLength;
+        if (!inFile.read(reinterpret_cast<char*>(&nameLength), sizeof(nameLength))) {
+            break; // TOBEDELETED: End of file
+        }
+        
+        std::string storedProcessName(nameLength, '\0');
+        if (!inFile.read(&storedProcessName[0], nameLength)) {
+            break;
+        }
+        
+        int storedPageNumber;
+        if (!inFile.read(reinterpret_cast<char*>(&storedPageNumber), sizeof(storedPageNumber))) {
+            break;
+        }
+        
+        uint32_t dataCount;
+        if (!inFile.read(reinterpret_cast<char*>(&dataCount), sizeof(dataCount))) {
+            break;
+        }
+        
+        if (storedProcessName == processName && storedPageNumber == pageNumber) {
+            // TOBEDELETED: Found the page - load the data
+            pageData.clear();
+            for (uint32_t i = 0; i < dataCount; ++i) {
+                uint32_t address;
+                uint16_t value;
+                if (!inFile.read(reinterpret_cast<char*>(&address), sizeof(address)) ||
+                    !inFile.read(reinterpret_cast<char*>(&value), sizeof(value))) {
+                    return false;
+                }
+                pageData[address] = value;
+            }
+            inFile.close();
+            return true;
+        } else {
+            // TOBEDELETED: Skip this page's data
+            for (uint32_t i = 0; i < dataCount; ++i) {
+                uint32_t address;
+                uint16_t value;
+                if (!inFile.read(reinterpret_cast<char*>(&address), sizeof(address)) ||
+                    !inFile.read(reinterpret_cast<char*>(&value), sizeof(value))) {
+                    break;
+                }
+            }
+        }
+    }
+    
+    inFile.close();
+    return false; // TOBEDELETED: Page not found in backing store
 }

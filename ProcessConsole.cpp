@@ -41,35 +41,54 @@ void ProcessConsole::onEnabled() {
         return;
     }
 
+    // TOBEDELETED: Fixed screen switching - display console and let main loop handle input
     display();
+}
 
-    String input;
-    while (true) {
-        std::cout << "\033[1;32mroot:\\>\033[0m "; // Make the prompt green and bold
-        std::getline(std::cin, input);
-
-        if (!input.empty()) {
-            bool shouldExit = handleCommand(input);
-            if (shouldExit) {
-                ConsoleManager::getInstance()->switchConsole(MAIN_CONSOLE);
-                break;
-            }
+void ProcessConsole::display() {
+    // TOBEDELETED: Revert - clear screen when switching to process console
+    system("cls");
+    
+    std::cout << "----------------------------------------\n";
+    std::cout << "Process Console: " << (attachedProcess ? attachedProcess->getName() : "Unknown") << "\n";
+    std::cout << "----------------------------------------\n\n";
+    
+    // TOBEDELETED: CRITICAL FIX - Automatically show process logs including PRINT output!
+    if (attachedProcess) {
+        std::cout << "Process Logs:\n";
+        attachedProcess->displayLogs();
+        std::cout << "\n";
+        
+        // Show process status
+        if (attachedProcess->hasFinished()) {
+            std::cout << "Status: FINISHED\n\n";
+        } else {
+            std::cout << "Status: " 
+                     << (attachedProcess->getStatus() == ProcessStatus::Running ? "RUNNING" :
+                         attachedProcess->getStatus() == ProcessStatus::Waiting ? "WAITING" : "SLEEPING")
+                     << " - Current line: " << (attachedProcess->getTotalInstructions() - attachedProcess->getRemainingInstructions())
+                     << " / " << attachedProcess->getTotalInstructions() << "\n\n";
         }
     }
 }
 
-void ProcessConsole::display() {
-    // Comment out or remove the system("cls") call
-    // system("cls");
-    
-    // Instead, print a separator
-    std::cout << "\n----------------------------------------\n";
-    std::cout << "Process Console: " << (attachedProcess ? attachedProcess->getName() : "Unknown") << "\n";
-    std::cout << "----------------------------------------\n\n";
-}
-
 void ProcessConsole::process() {
-    // Interactive handled in onEnabled()
+    // TOBEDELETED: Handle input properly for ProcessConsole
+    std::cout << "\033[1;32mroot:\\>\033[0m "; // Green and bold prompt
+    std::cout.flush();
+    
+    String input;
+    std::getline(std::cin, input);
+    
+    if (!input.empty()) {
+        bool shouldExit = handleCommand(input);
+        if (shouldExit) {
+            ConsoleManager::getInstance()->switchConsole(MAIN_CONSOLE);
+        } else {
+            // TOBEDELETED: Refresh display after any command to show new PRINT output
+            display();
+        }
+    }
 }
 
 bool ProcessConsole::handleCommand(const String& command) {
@@ -90,6 +109,11 @@ bool ProcessConsole::handleCommand(const String& command) {
     }
     else if (cmd == "process-smi" && attachedProcess) {
         showProcessInfo();
+        return false;
+    }
+    else if (cmd == "refresh" || cmd == "logs") {
+        // TOBEDELETED: Manual refresh command to see latest PRINT output
+        // display() will be called automatically after this returns
         return false;
     }
     // Memory dump command

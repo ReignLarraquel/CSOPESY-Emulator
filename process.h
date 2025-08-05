@@ -70,7 +70,11 @@ private:
     // Process instruction system
     std::vector<Instruction> instructions;              // Generated instruction sequence
     int currentInstructionIndex;                        // Current instruction being executed
-    std::map<std::string, uint16_t> variables;          // Variable storage (uint16)
+    // TOBEDELETED: MO2 specification - Variables stored in 64-byte symbol table segment (page 0) not std::map
+    std::map<std::string, uint32_t> variableAddresses;  // TOBEDELETED: Variable name -> memory address mapping for symbol table
+    uint32_t nextVariableAddress;                       // TOBEDELETED: Next available address in symbol table (starts at 0x0)
+    static const uint32_t SYMBOL_TABLE_SIZE = 64;       // TOBEDELETED: 64-byte symbol table segment size
+    static const uint32_t SYMBOL_TABLE_START = 0;       // TOBEDELETED: Symbol table starts at address 0x0
     std::vector<int> forLoopStack;                      // Stack for nested FOR loops
     std::vector<int> forCounterStack;                   // Current iteration counters
     int sleepCyclesRemaining;                           // For SLEEP instruction
@@ -151,6 +155,9 @@ private:
     void setVariableValue(const std::string& varName, uint16_t value);
     std::string generateRandomVariableName();
     std::string formatInstructionForLog(const Instruction& instr);
+    
+    // TOBEDELETED: String expression evaluation for PRINT concatenation
+    std::string evaluateStringExpression(const std::string& expression);
 
     std::unordered_map<uint32_t, uint16_t> memoryValues; // Address -> Value
     uint16_t readMemoryValue(uint32_t address);

@@ -31,35 +31,52 @@ CPUScheduler::~CPUScheduler() {
     }
 }
 
-void CPUScheduler::start() {
+// TOBEDELETED: Start CPU execution immediately (called during initialize)
+void CPUScheduler::startCpuExecution() {
     if (schedulerRunning.load()) return;
     
     schedulerRunning.store(true);
     String algorithm = Config::getScheduler();
     
-    std::cout << "Starting " << algorithm << " scheduler with " 
+    std::cout << "Starting " << algorithm << " CPU with " 
               << coreManager.getCoreCount() << " cores..." << std::endl;
-    startProcessGeneration();
     
-    // Start the master CPU tick thread
+    // TOBEDELETED: Start the master CPU tick thread - this makes CPU "active"
     tickThread = std::thread(&CPUScheduler::cpuTickManager, this);
 }
 
-void CPUScheduler::stop() {
-    if (!schedulerRunning.load()) return;
-    
-    std::cout << "Stopping process generation..." << std::endl;
-    std::cout << "Scheduler will continue until all processes finish." << std::endl;
-    
-    // Stop generating new processes immediately
-    generatorRunning.store(false);
-    if (generatorThread.joinable()) {
-        generatorThread.join();
+// TOBEDELETED: Stop CPU execution (called during shutdown)
+void CPUScheduler::stopCpuExecution() {
+    schedulerRunning.store(false);
+    if (tickThread.joinable()) {
+        tickThread.join();
+    }
+}
+
+// TOBEDELETED: scheduler-start command - now only controls process generation
+void CPUScheduler::start() {
+    if (generatorRunning.load()) {
+        std::cout << "\033[33mAutomatic process generation is already running.\033[0m" << std::endl;
+        return;
     }
     
-    // Main scheduler will continue running until all processes finish
-    // The cpuTickManager will detect when to stop automatically
-    // DO NOT wait here - return control to user immediately
+    std::cout << "Starting automatic process generation..." << std::endl;
+    startProcessGeneration();
+}
+
+// TOBEDELETED: scheduler-stop command - now only stops process generation
+void CPUScheduler::stop() {
+    if (!generatorRunning.load()) {
+        std::cout << "\033[33mAutomatic process generation is not running.\033[0m" << std::endl;
+        return;
+    }
+    
+    std::cout << "Stopping automatic process generation..." << std::endl;
+    std::cout << "CPU will continue executing existing processes." << std::endl;
+    
+    // TOBEDELETED: Stop generating new processes immediately
+    // TOBEDELETED: CPU execution continues - only stop the process generator
+    stopProcessGeneration();
 }
 
 void CPUScheduler::addProcess(std::shared_ptr<Process> process) {
@@ -105,6 +122,10 @@ void CPUScheduler::cpuTickManager() {
         // NEW CLEAN ARCHITECTURE - NO DEADLOCKS!
         onCpuTick();
         
+        // TOBEDELETED: Only auto-shutdown if generator was explicitly stopped (not if it was never started)
+        // TOBEDELETED: This prevents CPU from shutting down when user creates processes manually
+        // TOBEDELETED: Commented out auto-shutdown logic - CPU should run until explicitly stopped
+        /*
         // Check if scheduler-stop was called and all processes are finished
         if (!generatorRunning.load()) {
             // Check if all processes are finished (including sleeping ones)
@@ -118,6 +139,7 @@ void CPUScheduler::cpuTickManager() {
                 break;
             }
         }
+        */
         
         // Sleep for tick interval (1ms = 1000 ticks per second)
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -143,7 +165,8 @@ void CPUScheduler::onCpuTick() {
     
     // Phase 6: Generate memory snapshot every quantum cycle
     int quantumCycles = Config::getQuantumCycles();
-    if (cpuTicks.load() % quantumCycles == 0) {
+    // TOBEDELETED: Only generate memory snapshots if quantumCycles > 0 (avoid division by zero in FCFS)
+    if (quantumCycles > 0 && cpuTicks.load() % quantumCycles == 0) {
         int currentQuantum = static_cast<int>(cpuTicks.load() / quantumCycles);
         memoryManager.generateMemorySnapshot(currentQuantum);
     }
@@ -291,7 +314,18 @@ void CPUScheduler::scheduleWaitingProcesses() {
             continue;
         }
 
-        // Do not allocate any pages here. Demand paging will occur in executeInstruction().
+        // TOBEDELETED: CRITICAL FIX - Check if memory is available before assigning to core
+        // TOBEDELETED: This enforces the memory bottleneck - if no memory, process waits!
+        if (!memoryManager.allocateMemory(processName)) {
+            // TOBEDELETED: Not enough memory - put process back in queue and continue to next core
+            if (algorithm == "fcfs") {
+                fcfsQueue.push(processName);
+            }
+            else if (algorithm == "rr") {
+                roundRobinQueue.push_front(processName);
+            }
+            continue;
+        }
 
         if (coreManager.tryAssignProcess(coreId, processName)) {
             processManager.setProcessCore(processName, coreId);
@@ -302,6 +336,9 @@ void CPUScheduler::scheduleWaitingProcesses() {
             }
         }
         else {
+            // TOBEDELETED: Core assignment failed - deallocate the reserved memory
+            memoryManager.deallocateMemory(processName);
+            
             if (algorithm == "fcfs") {
                 fcfsQueue.push(processName);
             }
@@ -354,13 +391,35 @@ std::shared_ptr<Process> CPUScheduler::createRandomProcess(const String& name) {
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_int_distribution<> insDis(minIns, maxIns);
-    std::uniform_int_distribution<> memDis(64, 256); // or use powers of 2 only
 
     int numInstructions = insDis(gen);
 
-    // Generate valid memory size (power of 2 between 64 and 65536)
-    int allowedSizes[] = { 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536 };
-    int memorySize = allowedSizes[gen() % (sizeof(allowedSizes) / sizeof(allowedSizes[0]))];
+    // TOBEDELETED: MO2 specification - Use min/max-mem-per-proc range for auto-generated processes
+    // TOBEDELETED: "Let P be the number of pages required by a process and M is the rolled value 
+    // TOBEDELETED: between min-mem-per-proc and max-mem-proc. P can be computed as M/ mem-per-frame."
+    int minMem = Config::getMinMemPerProc();
+    int maxMem = Config::getMaxMemPerProc();
+    int frameSize = Config::getMemPerFrame();
+    
+    // TOBEDELETED: Generate random value M between min and max
+    std::uniform_int_distribution<> memDis(minMem, maxMem);
+    int rolledValue = memDis(gen); // This is M
+    
+    // TOBEDELETED: Calculate P = M / mem-per-frame (number of pages required)
+    int pagesRequired = (rolledValue + frameSize - 1) / frameSize; // TOBEDELETED: Ceiling division
+    
+    // TOBEDELETED: Calculate minimum memory size needed for P pages
+    int minimumMemoryNeeded = pagesRequired * frameSize;
+    
+    // TOBEDELETED: Find smallest power of 2 that provides at least the required memory
+    int memorySize = 64; // TOBEDELETED: Start with minimum [2^6]
+    while (memorySize < minimumMemoryNeeded && memorySize < 65536) {
+        memorySize *= 2;
+    }
+    
+    // TOBEDELETED: Ensure we stay within bounds [64, 65536] = [2^6, 2^16]
+    if (memorySize > 65536) memorySize = 65536;
+    if (memorySize < 64) memorySize = 64;
 
     return std::make_shared<Process>(name, nextProcessId - 1, numInstructions, memorySize);
 }

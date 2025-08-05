@@ -16,7 +16,7 @@ Process::Process(const std::string& name, int id, int numInstructions, int memor
     : name(name), id(id), totalInstructions(numInstructions),
     remainingInstructions(numInstructions), status(ProcessStatus::Waiting),
     assignedCore(-1), currentInstructionIndex(0), sleepCyclesRemaining(0),
-    memoryRequirement(memorySize) {
+    memoryRequirement(memorySize), nextVariableAddress(SYMBOL_TABLE_START) { // TOBEDELETED: Initialize symbol table address counter
 
     creationTime = getTimestamp();
 
@@ -116,7 +116,7 @@ Process::Process(const std::string& name, int id, int numInstructions, int memor
 
     // Main instruction execution method
     void Process::executeInstruction() {
-        if (remainingInstructions <= 0 || currentInstructionIndex >= instructions.size()) {
+        if (remainingInstructions <= 0 || currentInstructionIndex >= static_cast<int>(instructions.size())) { // TOBEDELETED: Fix C4018 warning
             return;
         }
 
@@ -144,11 +144,19 @@ Process::Process(const std::string& name, int id, int numInstructions, int memor
         int instructionSize = sizeof(Instruction);  // Typically 16-32 bytes depending on struct
         int virtualPage = (currentInstructionIndex * instructionSize) / frameSize;
 
-        // Check if page is present; if not, allocate it
+        // TOBEDELETED: Check if page is present; if not, allocate it (MO2 continuous page fault handling)
         auto& pt = this->getPageTableRef();
         if (pt.find(virtualPage) == pt.end() || !pt[virtualPage].valid) {
             if (memoryManager) {
-                memoryManager->allocatePage(this, virtualPage);
+                // TOBEDELETED: Continuously retry until page is allocated (MO2 requirement)
+                while (pt.find(virtualPage) == pt.end() || !pt[virtualPage].valid) {
+                    int frameNumber = memoryManager->allocatePage(this, virtualPage);
+                    if (frameNumber >= 0) {
+                        // TOBEDELETED: Page successfully allocated
+                        break;
+                    }
+                    // TOBEDELETED: Page allocation failed, continue retrying (clock algorithm will find victim)
+                }
             }
         }
 
@@ -175,7 +183,7 @@ Process::Process(const std::string& name, int id, int numInstructions, int memor
         currentInstructionIndex++;
         remainingInstructions--;
 
-        if (remainingInstructions == 0 || currentInstructionIndex >= instructions.size()) {
+        if (remainingInstructions == 0 || currentInstructionIndex >= static_cast<int>(instructions.size())) { // TOBEDELETED: Fix C4018 warning
             status = ProcessStatus::Finished;
         }
     }
@@ -195,12 +203,12 @@ Process::Process(const std::string& name, int id, int numInstructions, int memor
         int forNestingLevel = 0;
         std::vector<int> forStartPositions;
         
-        for (int i = 0; i < numInstructions && instructions.size() < totalInstructions; i++) {
+        for (int i = 0; i < numInstructions && static_cast<int>(instructions.size()) < totalInstructions; i++) { // TOBEDELETED: Fix C4018 warning
             InstructionType instrType = static_cast<InstructionType>(instrTypeDist(gen));
             
             // Limit FOR loop nesting to 3 levels and prevent new FOR loops if close to instruction limit
             if (instrType == InstructionType::FOR_START && 
-                (forNestingLevel >= 3 || instructions.size() >= totalInstructions - forStartPositions.size())) {
+                (forNestingLevel >= 3 || static_cast<int>(instructions.size()) >= totalInstructions - static_cast<int>(forStartPositions.size()))) { // TOBEDELETED: Fix C4018 warning
                 instrType = InstructionType::PRINT; // Default to PRINT instead
             }
             
@@ -209,12 +217,13 @@ Process::Process(const std::string& name, int id, int numInstructions, int memor
             switch (instrType) {
                 case InstructionType::PRINT: {
                     // Generate PRINT with variable or simple message
-                    if (variables.empty() || valueDist(gen) % 2 == 0) {
+                    // TOBEDELETED: Fix undeclared 'variables' - use variableAddresses instead
+                    if (variableAddresses.empty() || valueDist(gen) % 2 == 0) {
                         instr.arg1 = "Hello world from " + name + "!";
                     } else {
                         // Print a variable
-                        auto varIt = variables.begin();
-                        std::advance(varIt, valueDist(gen) % variables.size());
+                        auto varIt = variableAddresses.begin();
+                        std::advance(varIt, valueDist(gen) % variableAddresses.size());
                         instr.arg1 = "Value from: " + varIt->first;
                     }
                     break;
@@ -261,13 +270,13 @@ Process::Process(const std::string& name, int id, int numInstructions, int memor
                 case InstructionType::READ: {
                     instr.arg1 = generateRandomVariableName(); // Variable to store result
                     std::ostringstream addressStream;
-                    addressStream << "0x" << std::hex << (gen() % (memoryRequirement * Config::getMemPerFrame())); 
+                    addressStream << "0x" << std::hex << (gen() % (static_cast<uint32_t>(memoryRequirement) * static_cast<uint32_t>(Config::getMemPerFrame()))); // TOBEDELETED: Fix signed/unsigned 
                     instr.arg2 = addressStream.str();
                     break;
                 }
                 case InstructionType::WRITE: {
                     std::ostringstream addressStream;
-                    addressStream << "0x" << std::hex << (gen() % (memoryRequirement * Config::getMemPerFrame())); 
+                    addressStream << "0x" << std::hex << (gen() % (static_cast<uint32_t>(memoryRequirement) * static_cast<uint32_t>(Config::getMemPerFrame()))); // TOBEDELETED: Fix signed/unsigned 
                     instr.arg1 = addressStream.str();
                     instr.value = valueDist(gen); // Random value to write
                     break;
@@ -278,7 +287,7 @@ Process::Process(const std::string& name, int id, int numInstructions, int memor
         }
         
         // Close any unclosed FOR loops, but only if we have space
-        while (!forStartPositions.empty() && instructions.size() < totalInstructions) {
+        while (!forStartPositions.empty() && static_cast<int>(instructions.size()) < totalInstructions) { // TOBEDELETED: Fix C4018 warning
             Instruction endInstr(InstructionType::FOR_END);
             endInstr.forLevel = --forNestingLevel;
             instructions.push_back(endInstr);
@@ -287,7 +296,7 @@ Process::Process(const std::string& name, int id, int numInstructions, int memor
         }
         
         // Fill any remaining slots with PRINT instructions
-        while (instructions.size() < totalInstructions) {
+        while (static_cast<int>(instructions.size()) < totalInstructions) { // TOBEDELETED: Fix C4018 warning
             Instruction instr(InstructionType::PRINT);
             instr.arg1 = "Hello world from " + name + "!";
             instructions.push_back(instr);
@@ -298,7 +307,11 @@ Process::Process(const std::string& name, int id, int numInstructions, int memor
         std::ostringstream entry;
         entry << getTimestamp() << " Core:" << assignedCore << " ";
         
-        if (instr.arg1.find("Value from:") == 0) {
+        if (instr.arg2 == "EXPRESSION") {
+            // TOBEDELETED: Evaluate string concatenation expression like "Result: " + varC
+            std::string result = evaluateStringExpression(instr.arg1);
+            entry << "\"" << result << "\"";
+        } else if (instr.arg1.find("Value from:") == 0) {
             // Extract variable name and print its value
             std::string varName = instr.arg1.substr(12); // Remove "Value from: "
             uint16_t value = getVariableValue(varName);
@@ -387,28 +400,64 @@ Process::Process(const std::string& name, int id, int numInstructions, int memor
     }
 
     uint16_t Process::getVariableValue(const std::string& varName) {
-        auto it = variables.find(varName);
-        if (it != variables.end()) {
-            return it->second;
+        // TOBEDELETED: MO2 specification - Variables stored in 64-byte symbol table segment, not std::map
+        auto it = variableAddresses.find(varName);
+        if (it != variableAddresses.end()) {
+            // TOBEDELETED: Variable exists - read from memory at stored address
+            uint32_t address = it->second;
+            return readMemoryValue(address);
         }
-        // Auto-declare with value 0 if not found
-        variables[varName] = 0;
+        
+        // TOBEDELETED: Auto-declare with value 0 if not found (MO1 requirement)
+        // TOBEDELETED: Check if we have space in 64-byte symbol table (32 variables max)
+        if (static_cast<int>(variableAddresses.size()) >= 32) { // TOBEDELETED: Fix size_t comparison
+            // TOBEDELETED: Symbol table full - return 0 and log warning
+            std::ostringstream entry;
+            entry << getTimestamp() << " Core:" << assignedCore
+                << " WARNING: Cannot auto-declare variable '" << varName << "' - symbol table full (32 variables)";
+            logs.push_back(entry.str());
+            return 0;
+        }
+        
+        // TOBEDELETED: Allocate new variable in symbol table
+        uint32_t address = nextVariableAddress;
+        variableAddresses[varName] = address;
+        nextVariableAddress += 2; // TOBEDELETED: uint16 takes 2 bytes
+        
+        // TOBEDELETED: Initialize to 0 in memory
+        writeMemoryValue(address, 0);
         return 0;
     }
 
     void Process::setVariableValue(const std::string& varName, uint16_t value) {
-        // Check if we've reached the 32-variable limit (64 bytes / 2 bytes per variable = 32)
-        if (variables.size() < 32 || variables.find(varName) != variables.end()) {
-            // Either we haven't hit the limit, or the variable already exists
-            variables[varName] = std::min(value, static_cast<uint16_t>(65535));
+        // TOBEDELETED: MO2 specification - Variables stored in 64-byte symbol table segment, not std::map
+        auto it = variableAddresses.find(varName);
+        if (it != variableAddresses.end()) {
+            // TOBEDELETED: Variable exists - write to memory at stored address
+            uint32_t address = it->second;
+            uint16_t clampedValue = std::min(value, static_cast<uint16_t>(65535)); // TOBEDELETED: MO1 uint16 clamping
+            writeMemoryValue(address, clampedValue);
+            return;
         }
-        else {
-            // Log that we can't create more variables
+        
+        // TOBEDELETED: Variable doesn't exist - check if we can create it
+        if (static_cast<int>(variableAddresses.size()) >= 32) { // TOBEDELETED: Fix size_t comparison
+            // TOBEDELETED: Symbol table full - cannot create new variable
             std::ostringstream entry;
             entry << getTimestamp() << " Core:" << assignedCore
-                << " WARNING: Cannot create variable '" << varName << "' - variable limit reached (32)";
+                << " WARNING: Cannot create variable '" << varName << "' - symbol table limit reached (32 variables)";
             logs.push_back(entry.str());
+            return;
         }
+        
+        // TOBEDELETED: Create new variable in symbol table
+        uint32_t address = nextVariableAddress;
+        variableAddresses[varName] = address;
+        nextVariableAddress += 2; // TOBEDELETED: uint16 takes 2 bytes
+        
+        // TOBEDELETED: Store value in memory
+        uint16_t clampedValue = std::min(value, static_cast<uint16_t>(65535)); // TOBEDELETED: MO1 uint16 clamping
+        writeMemoryValue(address, clampedValue);
     }
 
     std::string Process::generateRandomVariableName() {
@@ -427,7 +476,7 @@ Process::Process(const std::string& name, int id, int numInstructions, int memor
 
     // Has the process completed all its work?
     bool Process::hasFinished() const {
-        return remainingInstructions == 0 || currentInstructionIndex >= instructions.size();
+        return remainingInstructions == 0 || currentInstructionIndex >= static_cast<int>(instructions.size()); // TOBEDELETED: Fix C4018 warning
     }
 
     // Status and core management
@@ -438,7 +487,7 @@ Process::Process(const std::string& name, int id, int numInstructions, int memor
     void Process::setStatus(ProcessStatus newStatus) {
         status = newStatus;
         // Auto-update to Finished status when no instructions remain
-        if (remainingInstructions == 0 || currentInstructionIndex >= instructions.size()) {
+        if (remainingInstructions == 0 || currentInstructionIndex >= static_cast<int>(instructions.size())) { // TOBEDELETED: Fix C4018 warning
             status = ProcessStatus::Finished;
         }
     }
@@ -473,7 +522,8 @@ Process::Process(const std::string& name, int id, int numInstructions, int memor
 
     bool Process::isValidMemoryAccess(uint32_t address) const {
         // Validate memory address is within process's allocated memory range
-        return address < (memoryRequirement * Config::getMemPerFrame());
+        // TOBEDELETED: Fix signed/unsigned mismatch
+        return address < (static_cast<uint32_t>(memoryRequirement) * static_cast<uint32_t>(Config::getMemPerFrame()));
     }
 
     uint16_t Process::readMemoryValue(uint32_t address) {
@@ -481,11 +531,20 @@ Process::Process(const std::string& name, int id, int numInstructions, int memor
         int pageSize = Config::getMemPerFrame();
         int pageNumber = address / pageSize;
 
-        // Check if we need to page in this memory
+        // TOBEDELETED: MO2 specification - "Page fault handling continuously occurs until a valid page has been returned"
         auto& pt = this->getPageTableRef();
         if (pt.find(pageNumber) == pt.end() || !pt[pageNumber].valid) {
             if (memoryManager) {
-                memoryManager->allocatePage(this, pageNumber);
+                // TOBEDELETED: Continuously retry until page is allocated (MO2 requirement)
+                while (pt.find(pageNumber) == pt.end() || !pt[pageNumber].valid) {
+                    int frameNumber = memoryManager->allocatePage(this, pageNumber);
+                    if (frameNumber >= 0) {
+                        // TOBEDELETED: Page successfully allocated
+                        break;
+                    }
+                    // TOBEDELETED: Page allocation failed, continue retrying (clock algorithm will find victim)
+                    // TOBEDELETED: In real OS this would be a blocking operation, here we busy-wait
+                }
             }
         }
 
@@ -502,11 +561,20 @@ Process::Process(const std::string& name, int id, int numInstructions, int memor
         int pageSize = Config::getMemPerFrame();
         int pageNumber = address / pageSize;
 
-        // Check if we need to page in this memory
+        // TOBEDELETED: MO2 specification - "Page fault handling continuously occurs until a valid page has been returned"
         auto& pt = this->getPageTableRef();
         if (pt.find(pageNumber) == pt.end() || !pt[pageNumber].valid) {
             if (memoryManager) {
-                memoryManager->allocatePage(this, pageNumber);
+                // TOBEDELETED: Continuously retry until page is allocated (MO2 requirement)
+                while (pt.find(pageNumber) == pt.end() || !pt[pageNumber].valid) {
+                    int frameNumber = memoryManager->allocatePage(this, pageNumber);
+                    if (frameNumber >= 0) {
+                        // TOBEDELETED: Page successfully allocated
+                        break;
+                    }
+                    // TOBEDELETED: Page allocation failed, continue retrying (clock algorithm will find victim)
+                    // TOBEDELETED: In real OS this would be a blocking operation, here we busy-wait
+                }
             }
         }
 
@@ -676,9 +744,10 @@ Process::Process(const std::string& name, int id, int numInstructions, int memor
             instructionList.push_back(input);
         }
         
-        // Validate instruction count
+        // TOBEDELETED: Validate instruction count - MO2 spec requires exact error message
         if (instructionList.empty() || instructionList.size() > 50) {
-            throw std::runtime_error("Invalid instruction count: must be between 1 and 50");
+            // TOBEDELETED: MO2 specification: "Throws 'invalid command' if the instruction size is not met"
+            throw std::runtime_error("invalid command");
         }
         
         // Parse each instruction
@@ -746,7 +815,7 @@ Process::Process(const std::string& name, int id, int numInstructions, int memor
                 instructions.push_back(instr);
             }
             else if (trimmed.find("PRINT") == 0) {
-                // Handle PRINT with string literals and expressions
+                // TOBEDELETED: Handle PRINT with string literals and expressions
                 size_t openParen = trimmed.find("(");
                 size_t closeParen = trimmed.find_last_of(")");
                 
@@ -755,6 +824,12 @@ Process::Process(const std::string& name, int id, int numInstructions, int memor
                     
                     Instruction instr(InstructionType::PRINT);
                     instr.arg1 = content;
+                    
+                    // TOBEDELETED: Check if this is a string concatenation expression (contains + operator)
+                    if (content.find(" + ") != std::string::npos) {
+                        instr.arg2 = "EXPRESSION"; // TOBEDELETED: Flag for expression evaluation
+                    }
+                    
                     instructions.push_back(instr);
                 }
             }
@@ -768,6 +843,57 @@ Process::Process(const std::string& name, int id, int numInstructions, int memor
             }
         }
         
-        remainingInstructions = instructions.size();
-        totalInstructions = instructions.size();
+        // TOBEDELETED: Fix size_t to int conversion warnings
+        remainingInstructions = static_cast<int>(instructions.size());
+        totalInstructions = static_cast<int>(instructions.size());
+    }
+
+    std::string Process::evaluateStringExpression(const std::string& expression) {
+        // TOBEDELETED: Parse and evaluate string concatenation expressions like "Result: " + varC
+        std::string result;
+        std::string current = expression;
+        
+        // TOBEDELETED: Split by " + " to get parts
+        size_t pos = 0;
+        while ((pos = current.find(" + ")) != std::string::npos) {
+            std::string part = current.substr(0, pos);
+            
+            // TOBEDELETED: Check if part is a string literal (has quotes) or variable
+            if (!part.empty() && part.front() == '"' && part.back() == '"') {
+                // TOBEDELETED: String literal - remove quotes
+                result += part.substr(1, part.length() - 2);
+            } else if (!part.empty() && part.front() == '"') {
+                // TOBEDELETED: String literal without closing quote - remove opening quote
+                result += part.substr(1);
+            } else if (!part.empty() && part.back() == '"') {
+                // TOBEDELETED: String literal without opening quote - remove closing quote
+                result += part.substr(0, part.length() - 1);
+            } else {
+                // TOBEDELETED: Variable reference - get its value
+                uint16_t value = getVariableValue(part);
+                result += std::to_string(value);
+            }
+            
+            current.erase(0, pos + 3); // TOBEDELETED: Remove processed part and " + " (pos is size_t, ok to add 3)
+        }
+        
+        // TOBEDELETED: Handle final part
+        if (!current.empty()) {
+            if (current.front() == '"' && current.back() == '"') {
+                // TOBEDELETED: String literal - remove quotes
+                result += current.substr(1, current.length() - 2);
+            } else if (current.front() == '"') {
+                // TOBEDELETED: String literal without closing quote - remove opening quote
+                result += current.substr(1);
+            } else if (current.back() == '"') {
+                // TOBEDELETED: String literal without opening quote - remove closing quote
+                result += current.substr(0, current.length() - 1);
+            } else {
+                // TOBEDELETED: Variable reference - get its value
+                uint16_t value = getVariableValue(current);
+                result += std::to_string(value);
+            }
+        }
+        
+        return result;
     }

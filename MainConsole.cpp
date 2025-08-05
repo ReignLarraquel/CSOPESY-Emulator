@@ -115,11 +115,38 @@ bool MainConsole::handleCommand(const String& command) {
 
 std::vector<String> MainConsole::parseCommand(const String& command) {
     std::vector<String> args;
-    std::istringstream iss(command);
-    String arg;
+    String currentArg;
+    bool inQuotes = false;
+    char quoteChar = '\0';
     
-    while (iss >> arg) {
-        args.push_back(arg);
+    // TOBEDELETED: Fixed parsing to handle quoted strings properly for screen -c command
+    // TOBEDELETED: This replaces the simple whitespace splitting that broke quoted instruction strings
+    for (size_t i = 0; i < command.length(); ++i) {
+        char c = command[i];
+        
+        if (!inQuotes && (c == '"' || c == '\'')) {
+            // TOBEDELETED: Start of quoted section
+            inQuotes = true;
+            quoteChar = c;
+        } else if (inQuotes && c == quoteChar) {
+            // TOBEDELETED: End of quoted section
+            inQuotes = false;
+            quoteChar = '\0';
+        } else if (!inQuotes && std::isspace(c)) {
+            // TOBEDELETED: Whitespace outside quotes - end current argument
+            if (!currentArg.empty()) {
+                args.push_back(currentArg);
+                currentArg.clear();
+            }
+        } else {
+            // TOBEDELETED: Regular character or quoted content
+            currentArg += c;
+        }
+    }
+    
+    // TOBEDELETED: Add final argument if exists
+    if (!currentArg.empty()) {
+        args.push_back(currentArg);
     }
     
     return args;
@@ -144,12 +171,20 @@ void MainConsole::initializeSystem() {
     int coreCount = Config::getNumCpu();
     coreManager = std::make_shared<CoreManager>(coreCount);
 
+    // TOBEDELETED: Start CPU execution immediately - CPU should always be "active" to run processes
+    // TOBEDELETED: This starts the CPU tick manager so processes execute as soon as they're created
+    scheduler->startCpuExecution();
+
     isSystemInitialized = true;
     std::cout << "\033[32mSystem initialized successfully!\033[0m" << std::endl;
 }
 
 void MainConsole::exitSystem() {
     std::cout << "Exiting CSOPESY..." << std::endl;
+    // TOBEDELETED: Stop CPU execution when exiting the system
+    if (scheduler) {
+        scheduler->stopCpuExecution();
+    }
 }
 
 void MainConsole::clearConsole() {
@@ -167,32 +202,27 @@ void MainConsole::handleScreenCommand(const std::vector<String>& args) {
         listProcesses();
     }
     else if (args[1] == "-c") {
-        // Handle custom instructions command
-        if (args.size() < 4) {
-            showErrorMessage("Invalid command. Usage: screen -c <process_name> <memory_size> \"<instructions>\"");
+        // TOBEDELETED: Handle custom instructions command - spec has inconsistency
+        // TOBEDELETED: Description says memory size required, but examples don't include it
+        if (args.size() < 3) {
+            showErrorMessage("Invalid command. Usage: screen -c <process_name> [<memory_size>] \"<instructions>\"");
             return;
         }
 
         String processName = args[2];
-        int memorySize = 512; // Default size
+        int memorySize = 512; // TOBEDELETED: Default size when not specified
         String instructionsStr;
 
         if (args.size() >= 5) {
-            // Format: screen -c process_name memory_size "instructions"
+            // TOBEDELETED: Format: screen -c process_name memory_size "instructions"
             try {
                 memorySize = std::stoi(args[3]);
-
-                // Get the instructions string - may have spaces and quotes
                 instructionsStr = args[4];
 
-                // Remove surrounding quotes if present
-                if (instructionsStr.front() == '"' && instructionsStr.back() == '"') {
-                    instructionsStr = instructionsStr.substr(1, instructionsStr.length() - 2);
-                }
-
-                // Validate memory size: must be power of 2 between 64 and 65536
+                // TOBEDELETED: Validate memory size: must be power of 2 between 64 and 65536
                 if (memorySize < 64 || memorySize > 65536 || (memorySize & (memorySize - 1)) != 0) {
-                    showErrorMessage("Invalid memory size. Must be a power of 2 between 64 and 65536.");
+                    // TOBEDELETED: MO2 specification requires exact error message: "invalid memory allocation"
+                    showErrorMessage("invalid memory allocation");
                     return;
                 }
             }
@@ -201,14 +231,29 @@ void MainConsole::handleScreenCommand(const std::vector<String>& args) {
                 return;
             }
         }
-        else {
-            // Format: screen -c process_name "instructions"
-            instructionsStr = args[3];
-
-            // Remove surrounding quotes if present
-            if (instructionsStr.front() == '"' && instructionsStr.back() == '"') {
-                instructionsStr = instructionsStr.substr(1, instructionsStr.length() - 2);
+        else if (args.size() == 4) {
+            // TOBEDELETED: Could be either format - check if arg[3] is number or instructions
+            try {
+                // TOBEDELETED: Try to parse as memory size first
+                memorySize = std::stoi(args[3]);
+                // TOBEDELETED: If successful, this is memory size but missing instructions
+                showErrorMessage("Invalid command. Usage: screen -c <process_name> [<memory_size>] \"<instructions>\"");
+                return;
             }
+            catch (const std::exception&) {
+                // TOBEDELETED: Not a number, must be instructions string
+                instructionsStr = args[3];
+                memorySize = 512; // TOBEDELETED: Use default
+            }
+        }
+        else {
+            showErrorMessage("Invalid command. Usage: screen -c <process_name> [<memory_size>] \"<instructions>\"");
+            return;
+        }
+
+        // TOBEDELETED: Remove surrounding quotes if present
+        if (!instructionsStr.empty() && instructionsStr.front() == '"' && instructionsStr.back() == '"') {
+            instructionsStr = instructionsStr.substr(1, instructionsStr.length() - 2);
         }
 
         // Create process with custom instructions
@@ -246,9 +291,10 @@ void MainConsole::handleScreenCommand(const std::vector<String>& args) {
         String processName = args[2];
         int memorySize = std::stoi(args[3]);
 
-        // Validate memory size: must be power of 2 between 64 and 65536
+        // TOBEDELETED: Validate memory size: must be power of 2 between 64 and 65536
         if (memorySize < 64 || memorySize > 65536 || (memorySize & (memorySize - 1)) != 0) {
-            showErrorMessage("Invalid memory size. Must be a power of 2 between 64 and 65536.");
+            // TOBEDELETED: MO2 specification requires exact error message: "invalid memory allocation"
+            showErrorMessage("invalid memory allocation");
             return;
         }
 
@@ -267,7 +313,7 @@ void MainConsole::handleScreenCommand(const std::vector<String>& args) {
 
         ConsoleManager::getInstance()->switchConsole(consoleName);
     }
-    else if (args[1] == "-r") {
+    else if (args[1] == "-r") { // TOBEDELETED: Fix missing opening brace
         if (args.size() < 3) {
             showErrorMessage("Missing process name. Usage: screen -r <process>");
             return;
@@ -326,13 +372,10 @@ void MainConsole::startScheduler() {
         showUninitializedError();
         return;
     }
-    if (!scheduler->isRunning()) {
-        scheduler->start();
-        scheduler->startProcessGeneration();
-        std::cout << "\033[32mScheduler started!\033[0m" << std::endl;
-    } else {
-        std::cout << "\033[33mScheduler is already running.\033[0m" << std::endl;
-    }
+    // TOBEDELETED: scheduler-start now only controls automatic process generation
+    // TOBEDELETED: CPU is already active from initialize, so this just starts auto-generation
+    scheduler->start();
+    std::cout << "\033[32mAutomatic process generation started!\033[0m" << std::endl;
 }
 
 void MainConsole::stopScheduler() {
@@ -340,12 +383,10 @@ void MainConsole::stopScheduler() {
         showUninitializedError();
         return;
     }
-    if (scheduler->isRunning()) {
-        scheduler->stop();
-        std::cout << "\033[33mScheduler stopping... (finishing existing processes)\033[0m" << std::endl;
-    } else {
-        std::cout << "\033[33mScheduler is not running.\033[0m" << std::endl;
-    }
+    // TOBEDELETED: scheduler-stop now only stops automatic process generation
+    // TOBEDELETED: CPU continues running existing processes
+    scheduler->stop();
+    std::cout << "\033[33mAutomatic process generation stopped.\033[0m" << std::endl;
 }
 
 void MainConsole::generateReport() {
@@ -519,19 +560,18 @@ void MainConsole::showProcessSMI() {
     int totalCores = scheduler->getCoreManager().getCoreCount();
     float cpuUtil = (totalCores == 0) ? 0 : ((float)activeCores / totalCores) * 100;
 
-    std::cout << "\n=== PROCESS-SMI SUMMARY ===" << std::endl;
+    // TOBEDELETED: Simple process-smi format as requested by user
+    std::cout << "PROCESS-SMI V01.00 Driver Version: 01.00" << std::endl;
     std::cout << "CPU-Util: " << std::fixed << std::setprecision(0) << cpuUtil << "%" << std::endl;
-    std::cout << "Memory Usage: " << usedMem << " / " << totalMem << " bytes" << std::endl;
-    std::cout << "Memory-Util: " << std::fixed << std::setprecision(0) << memUtil << "%" << std::endl;
+    std::cout << "Memory Usage: " << usedMem << "MiB / " << totalMem << "MiB" << std::endl;
+    std::cout << "Memory Util: " << std::fixed << std::setprecision(0) << memUtil << "%" << std::endl;
     std::cout << std::endl;
-
-    std::cout << "Processes in memory:" << std::endl;
+    std::cout << "Running processes and memory usage:" << std::endl;
+    
     for (const auto& [procName, pageCount] : usedPagesPerProcess) {
-        std::cout << "- " << procName << " | Pages: " << pageCount
-            << " | Mem: " << (pageCount * frameSize) << " bytes" << std::endl;
+        int memUsageMB = (pageCount * frameSize) / 1024; // TOBEDELETED: Convert to MiB
+        std::cout << procName << " " << memUsageMB << "MiB" << std::endl;
     }
-
-    std::cout << "=============================" << std::endl;
 }
 
 
